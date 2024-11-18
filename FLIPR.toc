@@ -1,0 +1,17 @@
+## Interface: 100200
+## Title: FLIPR
+## Notes: Adds a FLIPR tab to the Auction House for scanning specific items
+## Author: Your Name
+## Version: 1.0
+## SavedVariables: FLIPRSettings
+## Dependencies: Blizzard_AuctionHouseUI
+
+# Libraries
+Libs\LibStub\LibStub.lua
+Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
+Libs\AceAddon-3.0\AceAddon-3.0.lua
+Libs\AceEvent-3.0\AceEvent-3.0.lua
+Libs\AceHook-3.0\AceHook-3.0.lua
+
+# Core files
+FLIPR.lua 
