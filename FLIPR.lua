@@ -5,19 +5,93 @@ local FLIPR = AceAddon:NewAddon(addonName, "AceEvent-3.0", "AceHook-3.0")
 -- Get the version from TOC using the correct API
 local version = C_AddOns.GetAddOnMetadata(addonName, "Version") or "v0.070"
 
+-- Add this near the top of the file after the version declaration
+StaticPopupDialogs["FLIPR_CONFIRM_PURCHASE"] = {
+    text = "%s",
+    button1 = "Buy",
+    button2 = "Cancel",
+    OnShow = function(self)
+        if not self.data then return end
+        self.text:SetText(string.format(
+            "Buy %s x%d for %s?",
+            self.data.itemName,
+            self.data.quantity,
+            self.data.totalPrice
+        ))
+    end,
+    OnAccept = function(self)
+        if not self.data then return end
+        
+        if self.data.isCommodity then
+            print("Starting commodity purchase:", self.data.itemID, self.data.quantity)
+            
+            -- For commodities, we need to:
+            -- 1. Start the purchase
+            -- 2. Wait for the system to be ready
+            -- 3. Confirm the purchase
+            C_AuctionHouse.StartCommoditiesPurchase(self.data.itemID, self.data.quantity)
+            
+            -- Register for the throttled system ready event
+            FLIPR:RegisterEvent("AUCTION_HOUSE_THROTTLED_SYSTEM_READY", function()
+                print("System ready, confirming purchase...")
+                C_AuctionHouse.ConfirmCommoditiesPurchase(self.data.itemID, self.data.quantity)
+                FLIPR:UnregisterEvent("AUCTION_HOUSE_THROTTLED_SYSTEM_READY")
+            end)
+        else
+            if self.data.auctionID then
+                print("Placing bid:", self.data.auctionID, self.data.totalPrice)
+                C_AuctionHouse.PlaceBid(self.data.auctionID, self.data.totalPrice)
+            end
+        end
+    end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    preferredIndex = 3,
+    showAlert = true,
+    sound = SOUNDKIT.AUCTION_WINDOW_OPEN,
+    hasItemFrame = false,
+    parent = UIParent,
+}
+
+-- At the top of the file, after other StaticPopupDialogs definitions
+StaticPopupDialogs["FLIPR_TEST_POPUP"] = {
+    text = "Test popup window",
+    button1 = "OK",
+    button2 = "Cancel",
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    preferredIndex = 3,
+}
+
 -- Default scan items
 local defaultItems = {
     "Light Leather",
     "Medium Leather"
 }
 
+local defaultSettings = {
+    items = defaultItems,
+    showConfirm = true  -- Add default setting for confirmation dialog
+}
+
 -- Initialize addon
 function FLIPR:OnInitialize()
     -- Create settings if they don't exist
-    self.db = FLIPRSettings or {
-        items = defaultItems
-    }
-    FLIPRSettings = self.db
+    if not FLIPRSettings then
+        FLIPRSettings = defaultSettings
+    else
+        -- Ensure all default settings exist
+        for key, value in pairs(defaultSettings) do
+            if FLIPRSettings[key] == nil then
+                FLIPRSettings[key] = value
+            end
+        end
+    end
+    
+    self.db = FLIPRSettings
+    print("FLIPR Settings loaded. ShowConfirm:", self.db.showConfirm)  -- Debug print
     
     -- Register events
     self:RegisterEvent("AUCTION_HOUSE_SHOW")
@@ -191,16 +265,36 @@ function FLIPR:CreateFLIPRTab()
     
     -- Add click handler for buy button
     buyButton:SetScript("OnClick", function()
-        if self.selectedItem then
-            if self.selectedItem.isCommodity then
-                -- For commodity items (stackable)
-                C_AuctionHouse.StartCommodityPurchase(self.selectedItem.itemID, self.selectedItem.quantity)
-            else
-                -- For regular items
-                C_AuctionHouse.PlaceBid(self.selectedItem.auctionID, self.selectedItem.buyoutAmount)
-            end
+        print("Buy button clicked!")
+        print("ShowConfirm setting:", self.db.showConfirm)  -- Debug print
+        
+        if not self.selectedItem then
+            print("No item selected")
+            return
+        end
+
+        local itemID = self.selectedItem.itemID
+        if not itemID then
+            print("Invalid item selection - no itemID")
+            return
+        end
+
+        if self.db.showConfirm then
+            print("Showing confirmation dialog...")
+            self:ShowConfirmDialog(itemID, self.selectedItem.totalQuantity, self.selectedItem.minPrice)
         else
-            print("Please select an item first")
+            print("Direct purchase - no confirmation")
+            local isCommodity = self:IsCommodityItem(itemID)
+            if isCommodity then
+                local quantity = self.selectedItem.totalQuantity
+                if quantity and quantity > 0 then
+                    C_AuctionHouse.StartCommoditiesPurchase(itemID, quantity)
+                end
+            else
+                if self.selectedItem.auctionID and self.selectedItem.minPrice then
+                    C_AuctionHouse.PlaceBid(self.selectedItem.auctionID, self.selectedItem.minPrice)
+                end
+            end
         end
     end)
     
@@ -399,19 +493,18 @@ end
 -- Rename event handlers to match registration
 function FLIPR:OnCommoditySearchResults()
     local itemID = self.itemIDs[self.currentScanIndex]
-    -- Get number of results first
     local numResults = C_AuctionHouse.GetNumCommoditySearchResults(itemID)
     
     if numResults and numResults > 0 then
         local processedResults = {}
-        -- Get each result individually
         for i = 1, numResults do
             local result = C_AuctionHouse.GetCommoditySearchResultInfo(itemID, i)
             if result then
                 table.insert(processedResults, {
                     itemName = GetItemInfo(itemID),
                     minPrice = result.unitPrice,
-                    totalQuantity = result.quantity
+                    totalQuantity = result.quantity,
+                    itemID = itemID -- Add itemID to the result
                 })
             end
         end
@@ -534,7 +627,12 @@ function FLIPR:ProcessAuctionResults(results)
         quantityText:SetText(results[1].totalQuantity)
         
         -- Store the result data with the row
-        row.itemData = results[1]
+        row.itemData = {
+            itemID = self.itemIDs[self.currentScanIndex],
+            minPrice = results[1].minPrice,
+            totalQuantity = results[1].totalQuantity,
+            auctionID = results[1].auctionID -- This will be nil for commodities, which is fine
+        }
         
         -- Create dropdown content
         local dropdownContent = CreateFrame("Frame", nil, row)
@@ -597,6 +695,8 @@ function FLIPR:ProcessAuctionResults(results)
         
         -- Add click handler for selection and dropdown toggle
         row:SetScript("OnClick", function()
+            print("Row clicked!")  -- Debug print
+            
             -- Deselect previous row if exists
             if selectedRow and selectedRow.selectionTexture then
                 selectedRow.selectionTexture:Hide()
@@ -608,6 +708,7 @@ function FLIPR:ProcessAuctionResults(results)
             
             -- Store the selected item data
             self.selectedItem = row.itemData
+            print("Stored item data:", self.selectedItem.itemID, self.selectedItem.minPrice, self.selectedItem.totalQuantity)  -- Debug print
             
             -- Toggle dropdown
             dropdownContent:SetShown(not dropdownContent:IsShown())
@@ -621,6 +722,55 @@ function FLIPR:ProcessAuctionResults(results)
     
     -- Update scroll child height
     self.scrollChild:SetHeight((self.currentScanIndex * (rowHeight + 5)) + 10)
+end
+
+-- Add this helper function to determine if an item is a commodity
+function FLIPR:IsCommodityItem(itemID)
+    local itemInfo = C_AuctionHouse.GetItemKeyInfo(C_AuctionHouse.MakeItemKey(itemID))
+    return itemInfo and itemInfo.isCommodity
+end
+
+-- Add confirmation dialog function
+function FLIPR:ShowConfirmDialog(itemID, quantity, unitPrice)
+    local itemName = GetItemInfo(itemID)
+    local isCommodity = self:IsCommodityItem(itemID)
+    
+    -- Format prices nicely
+    local function FormatMoney(copper)
+        local gold = math.floor(copper / 10000)
+        local silver = math.floor((copper % 10000) / 100)
+        local copper = copper % 100
+        return string.format("%dg %ds %dc", gold, silver, copper)
+    end
+    
+    -- Calculate prices
+    local priceEach = FormatMoney(unitPrice)
+    local totalPrice = FormatMoney(unitPrice * quantity)
+    
+    -- Format the full message
+    local message = string.format("%s (%s x%d = %s)", 
+        itemName,
+        priceEach,
+        quantity,
+        totalPrice
+    )
+    
+    -- Show the popup with the formatted message
+    local dialog = StaticPopup_Show(
+        "FLIPR_CONFIRM_PURCHASE",
+        message  -- Just pass the complete formatted message
+    )
+    
+    if dialog then
+        dialog.data = {
+            itemName = itemName,
+            itemID = itemID,
+            quantity = quantity,
+            totalPrice = unitPrice * quantity,
+            isCommodity = isCommodity,
+            auctionID = self.selectedItem.auctionID
+        }
+    end
 end
 
 -- Initialize the addon
