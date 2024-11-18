@@ -146,6 +146,64 @@ function FLIPR:CreateFLIPRTab()
     versionText:SetText(version)
     versionText:SetTextColor(0.7, 0.7, 0.7, 1) -- Subtle gray color
     
+    -- Create Buy button with same style as scan button
+    local buyButton = CreateFrame("Button", nil, contentFrame)
+    buyButton:SetSize(80, 25) -- Slightly smaller than scan button
+    buyButton:SetPoint("RIGHT", versionText, "LEFT", -10, 0)
+    
+    -- Add button textures (same style as scan button)
+    local buyNormalTexture = buyButton:CreateTexture(nil, "BACKGROUND")
+    buyNormalTexture:SetAllPoints()
+    buyNormalTexture:SetColorTexture(0.2, 0.2, 0.2, 0.9)
+    
+    local buyHighlightTexture = buyButton:CreateTexture(nil, "HIGHLIGHT")
+    buyHighlightTexture:SetAllPoints()
+    buyHighlightTexture:SetColorTexture(0.3, 0.3, 0.3, 0.9)
+    
+    local buyPushedTexture = buyButton:CreateTexture(nil, "BACKGROUND")
+    buyPushedTexture:SetAllPoints()
+    buyPushedTexture:SetColorTexture(0.15, 0.15, 0.15, 0.9)
+    
+    -- Add button border
+    local buyBorder = buyButton:CreateTexture(nil, "BORDER")
+    buyBorder:SetAllPoints()
+    buyBorder:SetColorTexture(0.5, 0.4, 0, 0.5) -- Golden border
+    
+    -- Create button text
+    local buyButtonText = buyButton:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    buyButtonText:SetPoint("CENTER", buyButton, "CENTER", 0, 0)
+    buyButtonText:SetText("Buy")
+    buyButtonText:SetTextColor(1, 0.82, 0, 1) -- Golden text
+    
+    -- Set button textures
+    buyButton:SetNormalTexture(buyNormalTexture)
+    buyButton:SetHighlightTexture(buyHighlightTexture)
+    buyButton:SetPushedTexture(buyPushedTexture)
+    
+    -- Add mouseover effect for the text
+    buyButton:SetScript("OnEnter", function()
+        buyButtonText:SetTextColor(1, 0.9, 0.2, 1)
+    end)
+    
+    buyButton:SetScript("OnLeave", function()
+        buyButtonText:SetTextColor(1, 0.82, 0, 1)
+    end)
+    
+    -- Add click handler for buy button
+    buyButton:SetScript("OnClick", function()
+        if self.selectedItem then
+            if self.selectedItem.isCommodity then
+                -- For commodity items (stackable)
+                C_AuctionHouse.StartCommodityPurchase(self.selectedItem.itemID, self.selectedItem.quantity)
+            else
+                -- For regular items
+                C_AuctionHouse.PlaceBid(self.selectedItem.auctionID, self.selectedItem.buyoutAmount)
+            end
+        else
+            print("Please select an item first")
+        end
+    end)
+    
     -- Add glow behind text
     local glowTexture = titleBar:CreateTexture(nil, "BACKGROUND")
     glowTexture:SetPoint("CENTER", titleText, "CENTER", 0, 0)
@@ -422,6 +480,9 @@ end
 
 -- New helper function to process auction results
 function FLIPR:ProcessAuctionResults(results)
+    -- Store the results for the buy button
+    self.currentResults = results
+    
     -- Clear previous results
     for _, child in ipairs({self.scrollChild:GetChildren()}) do
         child:Hide()
@@ -441,6 +502,19 @@ function FLIPR:ProcessAuctionResults(results)
     bg:SetAllPoints()
     bg:SetColorTexture(0.1, 0.1, 0.1, 0.5)
     
+    -- Add highlight texture
+    local highlight = row:CreateTexture(nil, "HIGHLIGHT")
+    highlight:SetAllPoints()
+    highlight:SetColorTexture(1, 1, 1, 0.1)
+    row:SetHighlightTexture(highlight)
+    
+    -- Add selection texture
+    local selection = row:CreateTexture(nil, "BACKGROUND")
+    selection:SetAllPoints()
+    selection:SetColorTexture(1, 0.8, 0, 0.2)
+    selection:Hide()
+    row.selectionTexture = selection
+    
     -- Add item name
     local nameText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     nameText:SetPoint("LEFT", row, "LEFT", 5, 0)
@@ -458,6 +532,9 @@ function FLIPR:ProcessAuctionResults(results)
         local quantityText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         quantityText:SetPoint("RIGHT", row, "RIGHT", -25, 0)
         quantityText:SetText(results[1].totalQuantity)
+        
+        -- Store the result data with the row
+        row.itemData = results[1]
         
         -- Create dropdown content
         local dropdownContent = CreateFrame("Frame", nil, row)
@@ -478,6 +555,11 @@ function FLIPR:ProcessAuctionResults(results)
                 dropdownRow:SetSize(dropdownContent:GetWidth(), rowHeight)
                 dropdownRow:SetPoint("TOPLEFT", dropdownContent, "TOPLEFT", 0, -(i-2) * rowHeight)
                 
+                -- Add highlight on mouseover
+                local dropHighlight = dropdownRow:CreateTexture(nil, "HIGHLIGHT")
+                dropHighlight:SetAllPoints()
+                dropHighlight:SetColorTexture(1, 1, 1, 0.1)
+                
                 -- Price
                 local dropPrice = dropdownRow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
                 dropPrice:SetPoint("CENTER", dropdownRow, "CENTER", 0, 0)
@@ -487,13 +569,22 @@ function FLIPR:ProcessAuctionResults(results)
                 local dropQuantity = dropdownRow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
                 dropQuantity:SetPoint("RIGHT", dropdownRow, "RIGHT", -20, 0)
                 dropQuantity:SetText(result.totalQuantity)
+
+                -- Make dropdown rows clickable
+                dropdownRow:EnableMouse(true)
+                dropdownRow:SetScript("OnMouseDown", function()
+                    -- Deselect previous row if exists
+                    if selectedRow and selectedRow.selectionTexture then
+                        selectedRow.selectionTexture:Hide()
+                    end
+                    
+                    -- Select parent row and store this result's data
+                    selectedRow = row
+                    selection:Show()
+                    self.selectedItem = result
+                end)
             end
         end
-        
-        -- Toggle dropdown on click
-        row:SetScript("OnClick", function()
-            dropdownContent:SetShown(not dropdownContent:IsShown())
-        end)
         
         -- Add dropdown arrow
         local arrow = row:CreateTexture(nil, "OVERLAY")
@@ -501,8 +592,26 @@ function FLIPR:ProcessAuctionResults(results)
         arrow:SetPoint("RIGHT", row, "RIGHT", -5, 0)
         arrow:SetTexture("Interface\\Buttons\\UI-SpellbookIcon-NextPage-Up")
         
-        -- Store the row
+        -- Store the dropdown
         row.dropdownContent = dropdownContent
+        
+        -- Add click handler for selection and dropdown toggle
+        row:SetScript("OnClick", function()
+            -- Deselect previous row if exists
+            if selectedRow and selectedRow.selectionTexture then
+                selectedRow.selectionTexture:Hide()
+            end
+            
+            -- Select this row
+            selectedRow = row
+            selection:Show()
+            
+            -- Store the selected item data
+            self.selectedItem = row.itemData
+            
+            -- Toggle dropdown
+            dropdownContent:SetShown(not dropdownContent:IsShown())
+        end)
     else
         -- If no results, just show "No auctions found"
         local noResultsText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -512,12 +621,6 @@ function FLIPR:ProcessAuctionResults(results)
     
     -- Update scroll child height
     self.scrollChild:SetHeight((self.currentScanIndex * (rowHeight + 5)) + 10)
-    
-    -- Reset for next scan
-    self.firstUpdateDone = false
-    -- Move to next item
-    self.currentScanIndex = self.currentScanIndex + 1
-    C_Timer.After(0.5, function() self:ScanNextItem() end)
 end
 
 -- Initialize the addon
