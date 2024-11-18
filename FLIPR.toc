@@ -2,7 +2,7 @@
 ## Title: FLIPR
 ## Notes: Adds a FLIPR tab to the Auction House for scanning specific items
 ## Author: Your Name
-## Version: 1.0
+## Version: v0.069
 ## SavedVariables: FLIPRSettings
 ## Dependencies: Blizzard_AuctionHouseUI
 

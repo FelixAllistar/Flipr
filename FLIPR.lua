@@ -2,6 +2,9 @@ local addonName, addon = ...
 local AceAddon = LibStub("AceAddon-3.0")
 local FLIPR = AceAddon:NewAddon(addonName, "AceEvent-3.0", "AceHook-3.0")
 
+-- Get the version from TOC using the correct API
+local version = C_AddOns.GetAddOnMetadata(addonName, "Version") or "v0.070"
+
 -- Default scan items
 local defaultItems = {
     "Light Leather",
@@ -112,9 +115,94 @@ function FLIPR:CreateFLIPRTab()
     contentFrame:SetPoint("TOPLEFT", AuctionHouseFrame, "TOPLEFT", 0, -60)
     contentFrame:SetPoint("BOTTOMRIGHT", AuctionHouseFrame, "BOTTOMRIGHT", 0, 0)
     
-    -- Create scroll frame
+    -- Create title bar background
+    local titleBar = CreateFrame("Frame", nil, contentFrame)
+    titleBar:SetPoint("TOPLEFT", contentFrame, "TOPLEFT", 0, 0)
+    titleBar:SetPoint("RIGHT", contentFrame, "RIGHT", 0, 0)
+    titleBar:SetHeight(40)
+    
+    -- Add gradient texture to title bar
+    local bgTexture = titleBar:CreateTexture(nil, "BACKGROUND")
+    bgTexture:SetPoint("TOPLEFT", 0, 0)
+    bgTexture:SetPoint("BOTTOMRIGHT", 0, 0)
+    bgTexture:SetColorTexture(0.1, 0.1, 0.1, 0.8)
+    
+    -- Add fancy border at bottom of title bar
+    local borderTexture = titleBar:CreateTexture(nil, "ARTWORK")
+    borderTexture:SetPoint("BOTTOMLEFT", titleBar, "BOTTOMLEFT", 0, 0)
+    borderTexture:SetPoint("BOTTOMRIGHT", titleBar, "BOTTOMRIGHT", 0, 0)
+    borderTexture:SetHeight(2)
+    borderTexture:SetColorTexture(0.7, 0.7, 0.7, 0.5)
+    
+    -- Create title text with glow effect
+    local titleText = titleBar:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    titleText:SetPoint("CENTER", titleBar, "CENTER", 0, 0)
+    titleText:SetText("FLIPR")
+    titleText:SetTextColor(1, 0.8, 0, 1) -- Golden color
+    
+    -- Add version text
+    local versionText = titleBar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    versionText:SetPoint("RIGHT", titleBar, "RIGHT", -10, 0)
+    versionText:SetText(version)
+    versionText:SetTextColor(0.7, 0.7, 0.7, 1) -- Subtle gray color
+    
+    -- Add glow behind text
+    local glowTexture = titleBar:CreateTexture(nil, "BACKGROUND")
+    glowTexture:SetPoint("CENTER", titleText, "CENTER", 0, 0)
+    glowTexture:SetSize(128, 32)
+    glowTexture:SetTexture("Interface\\Artifacts\\PowerGlow1")
+    glowTexture:SetBlendMode("ADD")
+    glowTexture:SetAlpha(0.3)
+    
+    -- Create a custom button template
+    local scanButton = CreateFrame("Button", nil, contentFrame)
+    scanButton:SetSize(120, 25)
+    scanButton:SetPoint("LEFT", titleBar, "LEFT", 20, 0)
+    
+    -- Add button textures
+    local normalTexture = scanButton:CreateTexture(nil, "BACKGROUND")
+    normalTexture:SetAllPoints()
+    normalTexture:SetColorTexture(0.2, 0.2, 0.2, 0.9)
+    
+    local highlightTexture = scanButton:CreateTexture(nil, "HIGHLIGHT")
+    highlightTexture:SetAllPoints()
+    highlightTexture:SetColorTexture(0.3, 0.3, 0.3, 0.9)
+    
+    local pushedTexture = scanButton:CreateTexture(nil, "BACKGROUND")
+    pushedTexture:SetAllPoints()
+    pushedTexture:SetColorTexture(0.15, 0.15, 0.15, 0.9)
+    
+    -- Add button border
+    local border = scanButton:CreateTexture(nil, "BORDER")
+    border:SetAllPoints()
+    border:SetColorTexture(0.5, 0.4, 0, 0.5) -- Golden border
+    
+    -- Create button text
+    local buttonText = scanButton:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    buttonText:SetPoint("CENTER", scanButton, "CENTER", 0, 0)
+    buttonText:SetText("Scan Items")
+    buttonText:SetTextColor(1, 0.82, 0, 1) -- Golden text
+    
+    -- Set button textures
+    scanButton:SetNormalTexture(normalTexture)
+    scanButton:SetHighlightTexture(highlightTexture)
+    scanButton:SetPushedTexture(pushedTexture)
+    
+    -- Add click handler
+    scanButton:SetScript("OnClick", function() self:ScanItems() end)
+    
+    -- Add mouseover effect for the text
+    scanButton:SetScript("OnEnter", function()
+        buttonText:SetTextColor(1, 0.9, 0.2, 1) -- Brighter golden text on hover
+    end)
+    
+    scanButton:SetScript("OnLeave", function()
+        buttonText:SetTextColor(1, 0.82, 0, 1) -- Return to normal color
+    end)
+    
+    -- Create scroll frame with adjusted position
     local scrollFrame = CreateFrame("ScrollFrame", nil, contentFrame, "UIPanelScrollFrameTemplate")
-    scrollFrame:SetPoint("TOPLEFT", 10, -50)  -- Adjusted to make room for scan button
+    scrollFrame:SetPoint("TOPLEFT", titleBar, "BOTTOMLEFT", 10, -10)  -- Adjusted to be below title bar
     scrollFrame:SetPoint("BOTTOMRIGHT", -30, 10)
     
     -- Create scroll child
@@ -122,13 +210,6 @@ function FLIPR:CreateFLIPRTab()
     scrollChild:SetWidth(scrollFrame:GetWidth())
     scrollChild:SetHeight(1)  -- Will expand as we add content
     scrollFrame:SetScrollChild(scrollChild)
-    
-    -- Add scan button
-    local scanButton = CreateFrame("Button", nil, contentFrame, "UIPanelButtonTemplate")
-    scanButton:SetText("Scan Items")
-    scanButton:SetSize(120, 25)
-    scanButton:SetPoint("TOPLEFT", 20, -20)
-    scanButton:SetScript("OnClick", function() self:ScanItems() end)
     
     -- Store references
     self.fliprTab = fliprTab
