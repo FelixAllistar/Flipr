@@ -175,23 +175,30 @@ function FLIPR:ScanItems()
     if self.resultsFrame then
         self.resultsFrame:Hide()
     end
-    
+
     -- Create results frame if needed
     if not self.resultsFrame then
         self.resultsFrame = CreateFrame("Frame", nil, self.contentFrame)
         self.resultsFrame:SetPoint("TOPLEFT", 20, -60)
         self.resultsFrame:SetSize(self.contentFrame:GetWidth() - 40, self.contentFrame:GetHeight() - 80)
     end
-    
+
     -- Define item IDs directly
     local itemIDs = {
         6522  -- Pearl-clasped Cloak (testing with known item)
     }
-    
+
     -- Track current item being scanned
     self.currentScanIndex = 1
     self.itemIDs = itemIDs
-    
+
+    -- Register for search results events if not already registered
+    if not self.isEventRegistered then
+        self:RegisterEvent("COMMODITY_SEARCH_RESULTS_UPDATED", "OnCommoditySearchResults")
+        self:RegisterEvent("ITEM_SEARCH_RESULTS_UPDATED", "OnItemSearchResults")
+        self.isEventRegistered = true
+    end
+
     -- Start scanning first item
     self:ScanNextItem()
 end
@@ -199,11 +206,10 @@ end
 function FLIPR:ScanNextItem()
     if self.currentScanIndex <= #self.itemIDs then
         local itemID = self.itemIDs[self.currentScanIndex]
-        
+
         -- Wait for item info to be available
-        local itemName = GetItemInfo(itemID)
+        local itemName, _, _, _, _, itemClass, itemSubClass = GetItemInfo(itemID)
         if not itemName then
-            print("Waiting for item info to load...")
             -- Request item info and wait for it
             local item = Item:CreateFromItemID(itemID)
             item:ContinueOnItemLoad(function()
@@ -211,51 +217,126 @@ function FLIPR:ScanNextItem()
             end)
             return
         end
-        
+
         print("Scanning item: " .. itemName .. " (ID: " .. itemID .. ")")
+
+        -- Check if item is likely a commodity based on its class
+        local isCommodity = (
+            itemClass == Enum.ItemClass.Consumable or
+            itemClass == Enum.ItemClass.Reagent or
+            itemClass == Enum.ItemClass.TradeGoods or
+            itemClass == Enum.ItemClass.Recipe
+        )
         
-        -- Create item key using the API
-        local itemKey = C_AuctionHouse.MakeItemKey(itemID)
+        if isCommodity then
+            print("Scanning commodity item")
+            -- For commodities, use commodity search
+            C_AuctionHouse.SendSearchQuery(nil, {}, true, itemID)
+        else
+            print("Scanning regular item")
+            -- For regular items, use item search
+            local itemKey = C_AuctionHouse.MakeItemKey(itemID)
+            C_AuctionHouse.SendSearchQuery(itemKey, {}, true)
+        end
         
-        -- Register for results before sending query
-        self:RegisterEvent("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED")
-        
-        -- Send the search query
-        print("Sending browse query...")
-        C_AuctionHouse.SendBrowseQuery({
-            searchString = itemName,
-            minLevel = 0,
-            maxLevel = 0,
-            sorts = {{ sortOrder = 0, reverseSort = false }}
-        })
+        -- Register for both browse and commodity results
+        if not self.isEventRegistered then
+            self:RegisterEvent("COMMODITY_SEARCH_RESULTS_UPDATED", "OnCommoditySearchResults")
+            self:RegisterEvent("ITEM_SEARCH_RESULTS_UPDATED", "OnItemSearchResults")
+            self.isEventRegistered = true
+        end
+    else
+        -- Scanning complete
+        print("Item scanning complete.")
+        -- Unregister events
+        if self.isEventRegistered then
+            self:UnregisterEvent("COMMODITY_SEARCH_RESULTS_UPDATED")
+            self:UnregisterEvent("ITEM_SEARCH_RESULTS_UPDATED")
+            self.isEventRegistered = false
+        end
     end
 end
 
--- Update function name to match new event
-function FLIPR:AUCTION_HOUSE_BROWSE_RESULTS_UPDATED()
-    print("Browse results updated!")
-    local results = C_AuctionHouse.GetBrowseResults()
-    print("Number of results: " .. (results and #results or "0"))
+-- Rename event handlers to match registration
+function FLIPR:OnCommoditySearchResults()
+    local itemID = self.itemIDs[self.currentScanIndex]
+    -- Get number of results first
+    local numResults = C_AuctionHouse.GetNumCommoditySearchResults(itemID)
     
-    if results and #results > 0 then
+    if numResults and numResults > 0 then
         local processedResults = {}
-        for i, result in ipairs(results) do
-            table.insert(processedResults, {
-                itemName = result.itemKey.itemName or GetItemInfo(result.itemKey.itemID),
-                minPrice = result.minPrice,
-                totalQuantity = result.quantity or 1
-            })
+        -- Get each result individually
+        for i = 1, numResults do
+            local result = C_AuctionHouse.GetCommoditySearchResultInfo(itemID, i)
+            if result then
+                table.insert(processedResults, {
+                    itemName = GetItemInfo(itemID),
+                    minPrice = result.unitPrice,
+                    totalQuantity = result.quantity
+                })
+            end
         end
         self:ProcessAuctionResults(processedResults)
     else
-        print("No results found")
-        -- Move to next item
-        self.currentScanIndex = self.currentScanIndex + 1
-        C_Timer.After(0.5, function() self:ScanNextItem() end)
+        self:ProcessAuctionResults({})
     end
+end
+
+function FLIPR:OnItemSearchResults()
+    local itemID = self.itemIDs[self.currentScanIndex]
+    -- Create itemKey for search
+    local itemKey = C_AuctionHouse.MakeItemKey(itemID)
+    -- Get number of results first
+    local numResults = C_AuctionHouse.GetNumItemSearchResults(itemKey)
     
-    -- Unregister event until next scan
-    self:UnregisterEvent("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED")
+    if numResults and numResults > 0 then
+        local processedResults = {}
+        -- Get each result individually
+        for i = 1, numResults do
+            local result = C_AuctionHouse.GetItemSearchResultInfo(itemKey, i)
+            if result then
+                table.insert(processedResults, {
+                    itemName = GetItemInfo(itemID),
+                    minPrice = result.buyoutAmount or result.bidAmount,
+                    totalQuantity = 1
+                })
+            end
+        end
+        self:ProcessAuctionResults(processedResults)
+    else
+        self:ProcessAuctionResults({})
+    end
+end
+
+-- Update event handler for search results
+function FLIPR:AUCTION_HOUSE_SEARCH_RESULTS_UPDATED(_, itemKey)
+    -- Check if the itemKey matches the current item
+    if itemKey.itemID == self.itemIDs[self.currentScanIndex] then
+        print("Search results updated!")
+        local totalResults = C_AuctionHouse.GetNumReplicateItems()
+        print("Number of results: " .. totalResults)
+
+        if totalResults > 0 then
+            local processedResults = {}
+            for i = 1, totalResults do
+                local itemInfo = { C_AuctionHouse.GetReplicateItemInfo(i) }
+                table.insert(processedResults, {
+                    itemName = itemInfo[1],
+                    minPrice = itemInfo[10],
+                    totalQuantity = itemInfo[3]
+                })
+            end
+            self:ProcessAuctionResults(processedResults)
+        else
+            print("No results found")
+            -- Move to next item
+            self.currentScanIndex = self.currentScanIndex + 1
+            C_Timer.After(0.5, function() self:ScanNextItem() end)
+        end
+
+        -- Unregister event until next scan
+        self:UnregisterEvent("AUCTION_HOUSE_SEARCH_RESULTS_UPDATED")
+    end
 end
 
 -- New helper function to process auction results
@@ -359,4 +440,4 @@ function FLIPR:ProcessAuctionResults(results)
 end
 
 -- Initialize the addon
-FLIPR:OnInitialize() 
+FLIPR:OnInitialize()
