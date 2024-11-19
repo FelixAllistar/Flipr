@@ -73,7 +73,14 @@ local defaultItems = {
 
 local defaultSettings = {
     items = defaultItems,
-    showConfirm = true  -- Add default setting for confirmation dialog
+    showConfirm = true,
+    enabledGroups = {
+        ["1.Very High 10000+"] = false,
+        ["2.High 1000+"] = false,
+        ["3.Medium 100+"] = false,
+        ["4.Low 10+"] = false,
+        ["5.Very low 1+"] = false
+    }
 }
 
 -- Initialize addon
@@ -401,6 +408,38 @@ function FLIPR:CreateFLIPRTab()
         end)
         self.tabHooked = true
     end
+
+    -- Add checkbox container
+    local checkboxContainer = CreateFrame("Frame", nil, contentFrame)
+    checkboxContainer:SetSize(200, 150)
+    checkboxContainer:SetPoint("TOPLEFT", titleBar, "BOTTOMLEFT", 10, -10)
+
+    local groups = {
+        "1.Very High 10000+",
+        "2.High 1000+",
+        "3.Medium 100+",
+        "4.Low 10+",
+        "5.Very low 1+"
+    }
+
+    -- Create checkboxes for each group
+    local yOffset = 0
+    for i, groupName in ipairs(groups) do
+        local checkbox = CreateFrame("CheckButton", nil, checkboxContainer, "UICheckButtonTemplate")
+        checkbox:SetPoint("TOPLEFT", 0, -yOffset)
+        checkbox:SetChecked(self.db.enabledGroups[groupName])
+        
+        local label = checkbox:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        label:SetPoint("LEFT", checkbox, "RIGHT", 5, 0)
+        label:SetText(groupName)
+        
+        checkbox:SetScript("OnClick", function(self)
+            FLIPR.db.enabledGroups[groupName] = self:GetChecked()
+            FLIPR:UpdateScanItems()
+        end)
+        
+        yOffset = yOffset + 25
+    end
 end
 
 function FLIPR:ScanItems()
@@ -416,14 +455,16 @@ function FLIPR:ScanItems()
         self.resultsFrame:SetSize(self.contentFrame:GetWidth() - 40, self.contentFrame:GetHeight() - 80)
     end
 
-    -- Define item IDs directly
-    local itemIDs = {
-        6522  -- Pearl-clasped Cloak (testing with known item)
-    }
+    -- Get items from enabled groups
+    self:UpdateScanItems()
+    
+    if #self.itemIDs == 0 then
+        print("No groups selected!")
+        return
+    end
 
     -- Track current item being scanned
     self.currentScanIndex = 1
-    self.itemIDs = itemIDs
 
     -- Register for search results events if not already registered
     if not self.isEventRegistered then
@@ -771,6 +812,55 @@ function FLIPR:ShowConfirmDialog(itemID, quantity, unitPrice)
             auctionID = self.selectedItem.auctionID
         }
     end
+end
+
+-- Add this function to load a specific group's data
+function FLIPR:LoadGroupData(groupName)
+    local tableName = self:GetTableNameFromGroup(groupName)
+    print(string.format("Loading group data for: %s (table: %s)", groupName, tableName))  -- Debug print
+    local data = _G[tableName]
+    print(string.format("Data found: %s", data and "yes" or "no"))  -- Debug print
+    return data or {}
+end
+
+-- Add function to update scan items based on enabled groups
+function FLIPR:UpdateScanItems()
+    self.itemIDs = {}
+    
+    print("Updating scan items...")  -- Debug print
+    for groupName, enabled in pairs(self.db.enabledGroups) do
+        print(string.format("Group: %s, Enabled: %s", groupName, tostring(enabled)))  -- Debug print
+        if enabled then
+            local groupData = self:LoadGroupData(groupName)
+            print(string.format("Group data loaded, size: %d", next(groupData) and #groupData or 0))  -- Debug print
+            for itemID, _ in pairs(groupData) do
+                table.insert(self.itemIDs, itemID)
+            end
+        end
+    end
+    
+    print(string.format("Total items to scan: %d", #self.itemIDs))  -- Debug print
+    
+    -- Reset scan index
+    self.currentScanIndex = 1
+    
+    -- Update display
+    if self.scrollChild then
+        self.scrollChild:SetHeight(1) -- Reset height
+        -- Clear existing content
+        for _, child in pairs({self.scrollChild:GetChildren()}) do
+            child:Hide()
+            child:SetParent(nil)
+        end
+    end
+end
+
+-- Add function to get table name from group name
+function FLIPR:GetTableNameFromGroup(groupName)
+    -- Match the format used in split_data.py
+    local tableName = "FLIPR_ItemDatabase_" .. groupName:gsub(".", ""):gsub(" ", ""):gsub("+", "plus")
+    print(string.format("Generated table name: %s", tableName))  -- Debug print
+    return tableName
 end
 
 -- Initialize the addon

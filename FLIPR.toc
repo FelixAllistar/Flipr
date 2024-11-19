@@ -13,5 +13,12 @@ Libs\AceAddon-3.0\AceAddon-3.0.lua
 Libs\AceEvent-3.0\AceEvent-3.0.lua
 Libs\AceHook-3.0\AceHook-3.0.lua
 
+# Data files (lazy loaded)
+Data_1.Very_High_10000plus.lua
+Data_2.High_1000plus.lua
+Data_3.Medium_100plus.lua
+Data_4.Low_10plus.lua
+Data_5.Very_low_1plus.lua
+
 # Core files
 FLIPR.lua 
