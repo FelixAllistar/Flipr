@@ -1,6 +1,7 @@
 local addonName, addon = ...
 local AceAddon = LibStub("AceAddon-3.0")
 local FLIPR = AceAddon:NewAddon(addonName, "AceEvent-3.0", "AceHook-3.0")
+local ROW_HEIGHT = 25
 
 -- Get the version from TOC using the correct API
 local version = C_AddOns.GetAddOnMetadata(addonName, "Version") or "v0.070"
@@ -113,9 +114,6 @@ function FLIPR:AUCTION_HOUSE_SHOW()
 end
 
 function FLIPR:CreateFLIPRTab()
-    -- Add debug print
-    print("HELLO WORLD - FLIPR DEBUG")
-    
     -- Create the tab button
     local numTabs = #AuctionHouseFrame.Tabs + 1
     local fliprTab = CreateFrame("Button", "AuctionHouseFrameTab"..numTabs, AuctionHouseFrame)
@@ -153,20 +151,17 @@ function FLIPR:CreateFLIPRTab()
     fliprTab.Right:SetPoint("TOPRIGHT", 0, 0)
     
     -- Configure Active textures
-    -- LeftActive
     fliprTab.LeftActive:SetTexture("Interface\\FrameGeneral\\UI-Frame")
     fliprTab.LeftActive:SetTexCoord(0.835938, 0.902344, 0.140625, 0.203125)
     fliprTab.LeftActive:SetSize(17, 32)
     fliprTab.LeftActive:SetPoint("TOPLEFT", 0, 0)
     
-    -- MiddleActive
     fliprTab.MiddleActive:SetTexture("Interface\\FrameGeneral\\UI-Frame")
     fliprTab.MiddleActive:SetTexCoord(0.902344, 0.935547, 0.140625, 0.203125)
     fliprTab.MiddleActive:SetPoint("LEFT", fliprTab.LeftActive, "RIGHT")
     fliprTab.MiddleActive:SetPoint("RIGHT", fliprTab, "RIGHT", -16, 0)
     fliprTab.MiddleActive:SetHeight(32)
     
-    -- RightActive
     fliprTab.RightActive:SetTexture("Interface\\FrameGeneral\\UI-Frame")
     fliprTab.RightActive:SetTexCoord(0.935547, 1, 0.140625, 0.203125)
     fliprTab.RightActive:SetSize(16, 32)
@@ -190,46 +185,85 @@ function FLIPR:CreateFLIPRTab()
     
     -- Position the tab
     fliprTab:SetPoint("LEFT", AuctionHouseFrame.Tabs[numTabs-1], "RIGHT", -19, 0)
-    
-    -- Create the content frame with a scroll frame
+
+    -- Create our content frame
     local contentFrame = CreateFrame("Frame", nil, AuctionHouseFrame)
     contentFrame:SetPoint("TOPLEFT", AuctionHouseFrame, "TOPLEFT", 0, -60)
     contentFrame:SetPoint("BOTTOMRIGHT", AuctionHouseFrame, "BOTTOMRIGHT", 0, 0)
+    contentFrame:Hide()  -- Start hidden
+
+    -- Create the title section frame
+    local titleSection = CreateFrame("Frame", nil, contentFrame)
+    titleSection:SetPoint("TOPLEFT", contentFrame, "TOPLEFT", 0, 0)
+    titleSection:SetPoint("TOPRIGHT", contentFrame, "TOPRIGHT", 0, 0)
+    titleSection:SetHeight(40)
     
-    -- Create title bar background
-    local titleBar = CreateFrame("Frame", nil, contentFrame)
-    titleBar:SetPoint("TOPLEFT", contentFrame, "TOPLEFT", 0, 0)
-    titleBar:SetPoint("RIGHT", contentFrame, "RIGHT", 0, 0)
-    titleBar:SetHeight(40)
+    -- Add background to title section
+    local titleBg = titleSection:CreateTexture(nil, "BACKGROUND")
+    titleBg:SetAllPoints()
+    titleBg:SetColorTexture(0.1, 0.1, 0.1, 0.8)
+
+    -- Create scan button in title section
+    local scanButton = CreateFrame("Button", nil, titleSection)
+    scanButton:SetSize(120, 25)
+    scanButton:SetPoint("LEFT", titleSection, "LEFT", 20, 0)
     
-    -- Add gradient texture to title bar
-    local bgTexture = titleBar:CreateTexture(nil, "BACKGROUND")
-    bgTexture:SetPoint("TOPLEFT", 0, 0)
-    bgTexture:SetPoint("BOTTOMRIGHT", 0, 0)
-    bgTexture:SetColorTexture(0.1, 0.1, 0.1, 0.8)
+    -- Add button textures
+    local normalTexture = scanButton:CreateTexture(nil, "BACKGROUND")
+    normalTexture:SetAllPoints()
+    normalTexture:SetColorTexture(0.2, 0.2, 0.2, 0.9)
     
-    -- Add fancy border at bottom of title bar
-    local borderTexture = titleBar:CreateTexture(nil, "ARTWORK")
-    borderTexture:SetPoint("BOTTOMLEFT", titleBar, "BOTTOMLEFT", 0, 0)
-    borderTexture:SetPoint("BOTTOMRIGHT", titleBar, "BOTTOMRIGHT", 0, 0)
-    borderTexture:SetHeight(2)
-    borderTexture:SetColorTexture(0.7, 0.7, 0.7, 0.5)
+    local highlightTexture = scanButton:CreateTexture(nil, "HIGHLIGHT")
+    highlightTexture:SetAllPoints()
+    highlightTexture:SetColorTexture(0.3, 0.3, 0.3, 0.9)
     
-    -- Create title text with glow effect
-    local titleText = titleBar:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    titleText:SetPoint("CENTER", titleBar, "CENTER", 0, 0)
+    local pushedTexture = scanButton:CreateTexture(nil, "BACKGROUND")
+    pushedTexture:SetAllPoints()
+    pushedTexture:SetColorTexture(0.15, 0.15, 0.15, 0.9)
+    
+    -- Add button border
+    local border = scanButton:CreateTexture(nil, "BORDER")
+    border:SetAllPoints()
+    border:SetColorTexture(0.5, 0.4, 0, 0.5)
+    
+    -- Create button text
+    local buttonText = scanButton:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    buttonText:SetPoint("CENTER", scanButton, "CENTER", 0, 0)
+    buttonText:SetText("Scan Items")
+    buttonText:SetTextColor(1, 0.82, 0, 1)
+    
+    -- Set button textures
+    scanButton:SetNormalTexture(normalTexture)
+    scanButton:SetHighlightTexture(highlightTexture)
+    scanButton:SetPushedTexture(pushedTexture)
+    
+    -- Add click handler
+    scanButton:SetScript("OnClick", function() self:ScanItems() end)
+    
+    -- Add mouseover effect for the text
+    scanButton:SetScript("OnEnter", function()
+        buttonText:SetTextColor(1, 0.9, 0.2, 1)
+    end)
+    
+    scanButton:SetScript("OnLeave", function()
+        buttonText:SetTextColor(1, 0.82, 0, 1)
+    end)
+
+    -- Create title text
+    local titleText = titleSection:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    titleText:SetPoint("CENTER", titleSection, "CENTER", 0, 0)
     titleText:SetText("FLIPR")
-    titleText:SetTextColor(1, 0.8, 0, 1) -- Golden color
-    
+    titleText:SetTextColor(1, 0.8, 0, 1)
+
     -- Add version text
-    local versionText = titleBar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    versionText:SetPoint("RIGHT", titleBar, "RIGHT", -10, 0)
+    local versionText = titleSection:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    versionText:SetPoint("RIGHT", titleSection, "RIGHT", -10, 0)
     versionText:SetText(version)
-    versionText:SetTextColor(0.7, 0.7, 0.7, 1) -- Subtle gray color
-    
-    -- Create Buy button with same style as scan button
-    local buyButton = CreateFrame("Button", nil, contentFrame)
-    buyButton:SetSize(80, 25) -- Slightly smaller than scan button
+    versionText:SetTextColor(0.7, 0.7, 0.7, 1)
+
+    -- Create buy button
+    local buyButton = CreateFrame("Button", nil, titleSection)
+    buyButton:SetSize(80, 25)
     buyButton:SetPoint("RIGHT", versionText, "LEFT", -10, 0)
     
     -- Add button textures (same style as scan button)
@@ -248,172 +282,32 @@ function FLIPR:CreateFLIPRTab()
     -- Add button border
     local buyBorder = buyButton:CreateTexture(nil, "BORDER")
     buyBorder:SetAllPoints()
-    buyBorder:SetColorTexture(0.5, 0.4, 0, 0.5) -- Golden border
+    buyBorder:SetColorTexture(0.5, 0.4, 0, 0.5)
     
     -- Create button text
     local buyButtonText = buyButton:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     buyButtonText:SetPoint("CENTER", buyButton, "CENTER", 0, 0)
     buyButtonText:SetText("Buy")
-    buyButtonText:SetTextColor(1, 0.82, 0, 1) -- Golden text
+    buyButtonText:SetTextColor(1, 0.82, 0, 1)
     
     -- Set button textures
     buyButton:SetNormalTexture(buyNormalTexture)
     buyButton:SetHighlightTexture(buyHighlightTexture)
     buyButton:SetPushedTexture(buyPushedTexture)
     
-    -- Add mouseover effect for the text
-    buyButton:SetScript("OnEnter", function()
-        buyButtonText:SetTextColor(1, 0.9, 0.2, 1)
-    end)
+    -- Create the options section frame
+    local optionsSection = CreateFrame("Frame", nil, contentFrame)
+    optionsSection:SetPoint("TOPLEFT", titleSection, "BOTTOMLEFT", 0, 0)
+    optionsSection:SetPoint("TOPRIGHT", titleSection, "BOTTOMRIGHT", 0, 0)
+    optionsSection:SetHeight(40)  -- Same height as title section
     
-    buyButton:SetScript("OnLeave", function()
-        buyButtonText:SetTextColor(1, 0.82, 0, 1)
-    end)
-    
-    -- Add click handler for buy button
-    buyButton:SetScript("OnClick", function()
-        print("Buy button clicked!")
-        print("ShowConfirm setting:", self.db.showConfirm)  -- Debug print
-        
-        if not self.selectedItem then
-            print("No item selected")
-            return
-        end
+    -- Add background to options section
+    local optionsBg = optionsSection:CreateTexture(nil, "BACKGROUND")
+    optionsBg:SetAllPoints()
+    optionsBg:SetColorTexture(0.1, 0.1, 0.1, 0.8)
 
-        local itemID = self.selectedItem.itemID
-        if not itemID then
-            print("Invalid item selection - no itemID")
-            return
-        end
-
-        if self.db.showConfirm then
-            print("Showing confirmation dialog...")
-            self:ShowConfirmDialog(itemID, self.selectedItem.totalQuantity, self.selectedItem.minPrice)
-        else
-            print("Direct purchase - no confirmation")
-            local isCommodity = self:IsCommodityItem(itemID)
-            if isCommodity then
-                local quantity = self.selectedItem.totalQuantity
-                if quantity and quantity > 0 then
-                    C_AuctionHouse.StartCommoditiesPurchase(itemID, quantity)
-                end
-            else
-                if self.selectedItem.auctionID and self.selectedItem.minPrice then
-                    C_AuctionHouse.PlaceBid(self.selectedItem.auctionID, self.selectedItem.minPrice)
-                end
-            end
-        end
-    end)
-    
-    -- Add glow behind text
-    local glowTexture = titleBar:CreateTexture(nil, "BACKGROUND")
-    glowTexture:SetPoint("CENTER", titleText, "CENTER", 0, 0)
-    glowTexture:SetSize(128, 32)
-    glowTexture:SetTexture("Interface\\Artifacts\\PowerGlow1")
-    glowTexture:SetBlendMode("ADD")
-    glowTexture:SetAlpha(0.3)
-    
-    -- Create a custom button template
-    local scanButton = CreateFrame("Button", nil, contentFrame)
-    scanButton:SetSize(120, 25)
-    scanButton:SetPoint("LEFT", titleBar, "LEFT", 20, 0)
-    
-    -- Add button textures
-    local normalTexture = scanButton:CreateTexture(nil, "BACKGROUND")
-    normalTexture:SetAllPoints()
-    normalTexture:SetColorTexture(0.2, 0.2, 0.2, 0.9)
-    
-    local highlightTexture = scanButton:CreateTexture(nil, "HIGHLIGHT")
-    highlightTexture:SetAllPoints()
-    highlightTexture:SetColorTexture(0.3, 0.3, 0.3, 0.9)
-    
-    local pushedTexture = scanButton:CreateTexture(nil, "BACKGROUND")
-    pushedTexture:SetAllPoints()
-    pushedTexture:SetColorTexture(0.15, 0.15, 0.15, 0.9)
-    
-    -- Add button border
-    local border = scanButton:CreateTexture(nil, "BORDER")
-    border:SetAllPoints()
-    border:SetColorTexture(0.5, 0.4, 0, 0.5) -- Golden border
-    
-    -- Create button text
-    local buttonText = scanButton:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    buttonText:SetPoint("CENTER", scanButton, "CENTER", 0, 0)
-    buttonText:SetText("Scan Items")
-    buttonText:SetTextColor(1, 0.82, 0, 1) -- Golden text
-    
-    -- Set button textures
-    scanButton:SetNormalTexture(normalTexture)
-    scanButton:SetHighlightTexture(highlightTexture)
-    scanButton:SetPushedTexture(pushedTexture)
-    
-    -- Add click handler
-    scanButton:SetScript("OnClick", function() self:ScanItems() end)
-    
-    -- Add mouseover effect for the text
-    scanButton:SetScript("OnEnter", function()
-        buttonText:SetTextColor(1, 0.9, 0.2, 1) -- Brighter golden text on hover
-    end)
-    
-    scanButton:SetScript("OnLeave", function()
-        buttonText:SetTextColor(1, 0.82, 0, 1) -- Return to normal color
-    end)
-    
-    -- Create scroll frame with adjusted position
-    local scrollFrame = CreateFrame("ScrollFrame", nil, contentFrame, "UIPanelScrollFrameTemplate")
-    scrollFrame:SetPoint("TOPLEFT", titleBar, "BOTTOMLEFT", 10, -10)  -- Adjusted to be below title bar
-    scrollFrame:SetPoint("BOTTOMRIGHT", -30, 10)
-    
-    -- Create scroll child
-    local scrollChild = CreateFrame("Frame", nil, scrollFrame)
-    scrollChild:SetWidth(scrollFrame:GetWidth())
-    scrollChild:SetHeight(1)  -- Will expand as we add content
-    scrollFrame:SetScrollChild(scrollChild)
-    
-    -- Store references
-    self.fliprTab = fliprTab
-    self.contentFrame = contentFrame
-    self.scrollFrame = scrollFrame
-    self.scrollChild = scrollChild
-    
-    -- Add tab to AuctionHouseFrame.Tabs
-    table.insert(AuctionHouseFrame.Tabs, fliprTab)
-    
-    -- Hook tab switching
-    fliprTab:SetScript("OnClick", function()
-        -- Hide all other frames first
-        AuctionHouseFrame.BrowseResultsFrame:Hide()
-        AuctionHouseFrame.CategoriesList:Hide()
-        AuctionHouseFrame.ItemBuyFrame:Hide()
-        AuctionHouseFrame.ItemSellFrame:Hide()
-        AuctionHouseFrame.CommoditiesBuyFrame:Hide()
-        AuctionHouseFrame.CommoditiesSellFrame:Hide()
-        AuctionHouseFrame.WoWTokenResults:Hide()
-        AuctionHouseFrame.AuctionsFrame:Hide()
-        
-        -- Update tab appearance
-        PanelTemplates_SetTab(AuctionHouseFrame, numTabs)
-        
-        -- Show our content
-        contentFrame:Show()
-    end)
-    
-    -- Hook the AuctionHouseFrame tab system
-    if not self.tabHooked then
-        hooksecurefunc(AuctionHouseFrame, "SetDisplayMode", function(frame)
-            -- Hide our content when other tabs are selected
-            if frame.selectedTab ~= numTabs then
-                contentFrame:Hide()
-            end
-        end)
-        self.tabHooked = true
-    end
-
-    -- Add checkbox container
-    local checkboxContainer = CreateFrame("Frame", nil, contentFrame)
-    checkboxContainer:SetSize(200, 150)
-    checkboxContainer:SetPoint("TOPLEFT", titleBar, "BOTTOMLEFT", 10, -10)
-
+    -- Create checkboxes in the options section
+    local xOffset = 10  -- Start padding
     local groups = {
         "1.Very High 10000+",
         "2.High 1000+",
@@ -422,23 +316,97 @@ function FLIPR:CreateFLIPRTab()
         "5.Very low 1+"
     }
 
-    -- Create checkboxes for each group
-    local yOffset = 0
     for i, groupName in ipairs(groups) do
-        local checkbox = CreateFrame("CheckButton", nil, checkboxContainer, "UICheckButtonTemplate")
-        checkbox:SetPoint("TOPLEFT", 0, -yOffset)
+        local checkbox = CreateFrame("CheckButton", nil, optionsSection, "UICheckButtonTemplate")
+        checkbox:SetPoint("LEFT", xOffset, 0)
         checkbox:SetChecked(self.db.enabledGroups[groupName])
         
         local label = checkbox:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         label:SetPoint("LEFT", checkbox, "RIGHT", 5, 0)
         label:SetText(groupName)
+        label:SetTextColor(1, 0.82, 0, 1)  -- Golden text to match theme
         
         checkbox:SetScript("OnClick", function(self)
             FLIPR.db.enabledGroups[groupName] = self:GetChecked()
             FLIPR:UpdateScanItems()
         end)
         
-        yOffset = yOffset + 25
+        -- Calculate next xOffset based on label width
+        xOffset = xOffset + checkbox:GetWidth() + label:GetStringWidth() + 15
+    end
+
+    -- Create divider below options section
+    local divider = contentFrame:CreateTexture(nil, "ARTWORK")
+    divider:SetHeight(2)
+    divider:SetPoint("TOPLEFT", optionsSection, "BOTTOMLEFT", 0, 0)
+    divider:SetPoint("TOPRIGHT", optionsSection, "BOTTOMRIGHT", 0, 0)
+    divider:SetColorTexture(0.6, 0.6, 0.6, 0.8)
+
+    -- Add gradient edges to divider
+    local leftGradient = contentFrame:CreateTexture(nil, "ARTWORK")
+    leftGradient:SetSize(50, 2)
+    leftGradient:SetPoint("RIGHT", divider, "LEFT", 0, 0)
+    leftGradient:SetColorTexture(0.6, 0.6, 0.6, 0)
+    leftGradient:SetGradient("HORIZONTAL", CreateColor(0.6, 0.6, 0.6, 0), CreateColor(0.6, 0.6, 0.6, 0.8))
+
+    local rightGradient = contentFrame:CreateTexture(nil, "ARTWORK")
+    rightGradient:SetSize(50, 2)
+    rightGradient:SetPoint("LEFT", divider, "RIGHT", 0, 0)
+    rightGradient:SetColorTexture(0.6, 0.6, 0.6, 0)
+    rightGradient:SetGradient("HORIZONTAL", CreateColor(0.6, 0.6, 0.6, 0.8), CreateColor(0.6, 0.6, 0.6, 0))
+
+    -- Create results section with ScrollFrame
+    local resultsSection = CreateFrame("Frame", nil, contentFrame)
+    resultsSection:SetPoint("TOPLEFT", divider, "BOTTOMLEFT", 0, -20)
+    resultsSection:SetPoint("BOTTOMRIGHT", contentFrame, "BOTTOMRIGHT", 0, 0)
+    
+    -- Add background to results section
+    local resultsBg = resultsSection:CreateTexture(nil, "BACKGROUND")
+    resultsBg:SetAllPoints()
+    resultsBg:SetColorTexture(0.05, 0.05, 0.05, 0.9)
+
+    -- Create ScrollFrame inside resultsSection
+    local scrollFrame = CreateFrame("ScrollFrame", nil, resultsSection, "UIPanelScrollFrameTemplate")
+    scrollFrame:SetPoint("TOPLEFT", resultsSection, "TOPLEFT", 10, -10)
+    scrollFrame:SetPoint("BOTTOMRIGHT", resultsSection, "BOTTOMRIGHT", -30, 10)  -- Leave room for scroll bar
+
+    -- Create the scrolling content frame
+    local scrollChild = CreateFrame("Frame", nil, scrollFrame)
+    scrollFrame:SetScrollChild(scrollChild)
+    scrollChild:SetWidth(scrollFrame:GetWidth())
+    scrollChild:SetHeight(1) -- Will be adjusted as we add content
+
+    -- Store references
+    self.scrollFrame = scrollFrame
+    self.scrollChild = scrollChild
+
+    -- Hook tab switching (keep original hook code)
+    fliprTab:SetScript("OnClick", function()
+        PanelTemplates_SetTab(AuctionHouseFrame, numTabs)
+        -- Hide all other frames
+        AuctionHouseFrame.BrowseResultsFrame:Hide()
+        AuctionHouseFrame.CategoriesList:Hide()
+        AuctionHouseFrame.ItemBuyFrame:Hide()
+        AuctionHouseFrame.ItemSellFrame:Hide()
+        AuctionHouseFrame.CommoditiesBuyFrame:Hide()
+        AuctionHouseFrame.CommoditiesSellFrame:Hide()
+        AuctionHouseFrame.WoWTokenResults:Hide()
+        AuctionHouseFrame.AuctionsFrame:Hide()
+        -- Show our content
+        contentFrame:Show()
+    end)
+
+    -- Add tab to AuctionHouseFrame.Tabs
+    table.insert(AuctionHouseFrame.Tabs, fliprTab)
+    
+    -- Hook the AuctionHouseFrame tab system
+    if not self.tabHooked then
+        hooksecurefunc(AuctionHouseFrame, "SetDisplayMode", function(frame)
+            if frame.selectedTab ~= numTabs then
+                contentFrame:Hide()
+            end
+        end)
+        self.tabHooked = true
     end
 end
 
@@ -450,9 +418,9 @@ function FLIPR:ScanItems()
 
     -- Create results frame if needed
     if not self.resultsFrame then
-        self.resultsFrame = CreateFrame("Frame", nil, self.contentFrame)
-        self.resultsFrame:SetPoint("TOPLEFT", 20, -60)
-        self.resultsFrame:SetSize(self.contentFrame:GetWidth() - 40, self.contentFrame:GetHeight() - 80)
+        self.resultsFrame = CreateFrame("Frame", nil, self.resultsSection)  -- Parent to resultsSection
+        self.resultsFrame:SetPoint("TOPLEFT", self.resultsSection, "TOPLEFT", 20, -20)  -- Added padding
+        self.resultsFrame:SetPoint("BOTTOMRIGHT", self.resultsSection, "BOTTOMRIGHT", -20, 20)  -- Added padding
     end
 
     -- Get items from enabled groups
@@ -614,155 +582,76 @@ end
 
 -- New helper function to process auction results
 function FLIPR:ProcessAuctionResults(results)
-    -- Store the results for the buy button
-    self.currentResults = results
+    local itemID = self.itemIDs[self.currentScanIndex]
+    local itemName = GetItemInfo(itemID)
     
-    -- Clear previous results
-    for _, child in ipairs({self.scrollChild:GetChildren()}) do
-        child:Hide()
-        child:SetParent(nil)
+    if not itemName then
+        print("Item info not available for ID:", itemID)
+        return
     end
-    
-    local itemName = GetItemInfo(self.itemIDs[self.currentScanIndex])
-    local rowHeight = 25
-    
+
     -- Create row for this item
-    local row = CreateFrame("Button", nil, self.scrollChild)
-    row:SetSize(self.scrollChild:GetWidth(), rowHeight)
-    row:SetPoint("TOPLEFT", self.scrollChild, "TOPLEFT", 0, -(self.currentScanIndex - 1) * (rowHeight + 5))
+    local rowContainer = CreateFrame("Frame", nil, self.scrollChild)
+    rowContainer:SetSize(self.scrollChild:GetWidth(), ROW_HEIGHT)
+    rowContainer:SetPoint("TOPLEFT", self.scrollChild, "TOPLEFT", 0, -(self.currentScanIndex - 1) * (ROW_HEIGHT + 5))
+
+    -- Main row
+    local row = CreateFrame("Button", nil, rowContainer)
+    row:SetAllPoints(rowContainer)
     
-    -- Add background texture
+    -- Background
     local bg = row:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints()
     bg:SetColorTexture(0.1, 0.1, 0.1, 0.5)
-    
-    -- Add highlight texture
-    local highlight = row:CreateTexture(nil, "HIGHLIGHT")
-    highlight:SetAllPoints()
-    highlight:SetColorTexture(1, 1, 1, 0.1)
-    row:SetHighlightTexture(highlight)
-    
-    -- Add selection texture
-    local selection = row:CreateTexture(nil, "BACKGROUND")
-    selection:SetAllPoints()
-    selection:SetColorTexture(1, 0.8, 0, 0.2)
-    selection:Hide()
-    row.selectionTexture = selection
-    
-    -- Add item name
+
+    -- Item name
     local nameText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     nameText:SetPoint("LEFT", row, "LEFT", 5, 0)
     nameText:SetText(itemName)
-    
-    -- Only add price and quantity if we have results
-    if results[1] then
-        -- Add lowest price
-        local lowestPrice = results[1].minPrice / 10000
+
+    if results and #results > 0 then
+        -- Price and quantity for main row
         local priceText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         priceText:SetPoint("CENTER", row, "CENTER", 0, 0)
-        priceText:SetText(string.format("%.2fg", lowestPrice))
+        priceText:SetText(GetCoinTextureString(results[1].minPrice))
         
-        -- Add quantity
         local quantityText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         quantityText:SetPoint("RIGHT", row, "RIGHT", -25, 0)
         quantityText:SetText(results[1].totalQuantity)
-        
-        -- Store the result data with the row
-        row.itemData = {
-            itemID = self.itemIDs[self.currentScanIndex],
-            minPrice = results[1].minPrice,
-            totalQuantity = results[1].totalQuantity,
-            auctionID = results[1].auctionID -- This will be nil for commodities, which is fine
-        }
-        
-        -- Create dropdown content
-        local dropdownContent = CreateFrame("Frame", nil, row)
-        dropdownContent:SetSize(row:GetWidth(), rowHeight * 4)
-        dropdownContent:SetPoint("TOPLEFT", row, "BOTTOMLEFT", 0, -2)
-        dropdownContent:Hide()
-        
-        -- Add background to dropdown
-        local dropBg = dropdownContent:CreateTexture(nil, "BACKGROUND")
-        dropBg:SetAllPoints()
-        dropBg:SetColorTexture(0.1, 0.1, 0.1, 0.8)
-        
-        -- Add next 4 auction entries to dropdown
-        for i = 2, math.min(5, #results) do
-            local result = results[i]
-            if result then
-                local dropdownRow = CreateFrame("Frame", nil, dropdownContent)
-                dropdownRow:SetSize(dropdownContent:GetWidth(), rowHeight)
-                dropdownRow:SetPoint("TOPLEFT", dropdownContent, "TOPLEFT", 0, -(i-2) * rowHeight)
-                
-                -- Add highlight on mouseover
-                local dropHighlight = dropdownRow:CreateTexture(nil, "HIGHLIGHT")
-                dropHighlight:SetAllPoints()
-                dropHighlight:SetColorTexture(1, 1, 1, 0.1)
-                
-                -- Price
-                local dropPrice = dropdownRow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-                dropPrice:SetPoint("CENTER", dropdownRow, "CENTER", 0, 0)
-                dropPrice:SetText(string.format("%.2fg", result.minPrice / 10000))
-                
-                -- Quantity
-                local dropQuantity = dropdownRow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-                dropQuantity:SetPoint("RIGHT", dropdownRow, "RIGHT", -20, 0)
-                dropQuantity:SetText(result.totalQuantity)
 
-                -- Make dropdown rows clickable
-                dropdownRow:EnableMouse(true)
-                dropdownRow:SetScript("OnMouseDown", function()
-                    -- Deselect previous row if exists
-                    if selectedRow and selectedRow.selectionTexture then
-                        selectedRow.selectionTexture:Hide()
-                    end
-                    
-                    -- Select parent row and store this result's data
-                    selectedRow = row
-                    selection:Show()
-                    self.selectedItem = result
-                end)
-            end
+        -- Create dropdown container
+        local dropDown = CreateFrame("Frame", nil, rowContainer)
+        dropDown:SetSize(row:GetWidth(), ROW_HEIGHT * math.min(4, #results-1))
+        dropDown:SetPoint("TOPLEFT", row, "BOTTOMLEFT", 0, -2)
+        dropDown:Hide()
+
+        -- Add dropdown rows
+        for i = 2, math.min(5, #results) do
+            local dropDownRow = CreateFrame("Button", nil, dropDown)
+            dropDownRow:SetSize(dropDown:GetWidth(), ROW_HEIGHT)
+            dropDownRow:SetPoint("TOPLEFT", dropDown, "TOPLEFT", 0, -(i-2) * ROW_HEIGHT)
+            
+            -- Add dropdown row content...
         end
-        
-        -- Add dropdown arrow
-        local arrow = row:CreateTexture(nil, "OVERLAY")
-        arrow:SetSize(16, 16)
-        arrow:SetPoint("RIGHT", row, "RIGHT", -5, 0)
-        arrow:SetTexture("Interface\\Buttons\\UI-SpellbookIcon-NextPage-Up")
-        
-        -- Store the dropdown
-        row.dropdownContent = dropdownContent
-        
-        -- Add click handler for selection and dropdown toggle
+
+        -- Toggle dropdown on click
         row:SetScript("OnClick", function()
-            print("Row clicked!")  -- Debug print
-            
-            -- Deselect previous row if exists
-            if selectedRow and selectedRow.selectionTexture then
-                selectedRow.selectionTexture:Hide()
-            end
-            
-            -- Select this row
-            selectedRow = row
-            selection:Show()
-            
-            -- Store the selected item data
-            self.selectedItem = row.itemData
-            print("Stored item data:", self.selectedItem.itemID, self.selectedItem.minPrice, self.selectedItem.totalQuantity)  -- Debug print
-            
-            -- Toggle dropdown
-            dropdownContent:SetShown(not dropdownContent:IsShown())
+            dropDown:SetShown(not dropDown:IsShown())
         end)
     else
-        -- If no results, just show "No auctions found"
         local noResultsText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         noResultsText:SetPoint("CENTER", row, "CENTER", 0, 0)
         noResultsText:SetText("No auctions found")
     end
-    
-    -- Update scroll child height
-    self.scrollChild:SetHeight((self.currentScanIndex * (rowHeight + 5)) + 10)
+
+    -- Update scroll child height for just the main rows
+    self.scrollChild:SetHeight(self.currentScanIndex * (ROW_HEIGHT + 5))
+
+    -- Move to next item
+    self.currentScanIndex = self.currentScanIndex + 1
+    if self.currentScanIndex <= #self.itemIDs then
+        C_Timer.After(0.5, function() self:ScanNextItem() end)
+    end
 end
 
 -- Add this helper function to determine if an item is a commodity
@@ -857,8 +746,8 @@ end
 
 -- Add function to get table name from group name
 function FLIPR:GetTableNameFromGroup(groupName)
-    -- Match the format used in split_data.py
-    local tableName = "FLIPR_ItemDatabase_" .. groupName:gsub(".", ""):gsub(" ", ""):gsub("+", "plus")
+    -- Match the format used in split_data.py exactly
+    local tableName = "FLIPR_ItemDatabase_" .. groupName:gsub("[%.]", ""):gsub(" ", ""):gsub("[%+]", "plus")
     print(string.format("Generated table name: %s", tableName))  -- Debug print
     return tableName
 end
