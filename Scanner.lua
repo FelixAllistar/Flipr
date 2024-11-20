@@ -1,5 +1,6 @@
 local addonName, addon = ...
 local FLIPR = addon.FLIPR
+local ROW_HEIGHT = 25
 
 function FLIPR:ScanItems()
     -- Get items from enabled groups
@@ -126,8 +127,8 @@ function FLIPR:ProcessAuctionResults(results)
 
     -- Create row for this item
     local rowContainer = CreateFrame("Frame", nil, self.scrollChild)
-    rowContainer:SetSize(self.scrollChild:GetWidth(), 25)
-    rowContainer:SetPoint("TOPLEFT", self.scrollChild, "TOPLEFT", 0, -(self.currentScanIndex - 1) * 30)
+    rowContainer:SetSize(self.scrollChild:GetWidth(), ROW_HEIGHT)
+    rowContainer:SetPoint("TOPLEFT", self.scrollChild, "TOPLEFT", 0, -(self.currentScanIndex - 1) * (ROW_HEIGHT + 5))
 
     -- Main row
     local row = CreateFrame("Button", nil, rowContainer)
@@ -152,14 +153,17 @@ function FLIPR:ProcessAuctionResults(results)
     nameText:SetText(itemName)
 
     if results and #results > 0 then
+        -- Store all auction data with the row
         row.itemData = {
             itemID = itemID,
             minPrice = results[1].minPrice,
             totalQuantity = results[1].totalQuantity,
             auctionID = results[1].auctionID,
-            selected = false
+            selected = false,
+            allAuctions = results  -- Store all auctions for this item
         }
         
+        -- Price and quantity for main row
         local priceText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         priceText:SetPoint("CENTER", row, "CENTER", 0, 0)
         priceText:SetText(GetCoinTextureString(results[1].minPrice))
@@ -168,16 +172,122 @@ function FLIPR:ProcessAuctionResults(results)
         quantityText:SetPoint("RIGHT", row, "RIGHT", -25, 0)
         quantityText:SetText(results[1].totalQuantity)
 
-        row:SetScript("OnClick", function()
-            self:SelectItem(row)
-        end)
+        -- Create dropdown for additional auctions
+        if #results > 1 then
+            local dropDown = CreateFrame("Frame", nil, row)
+            dropDown:SetFrameStrata("DIALOG")
+            dropDown:SetSize(row:GetWidth(), ROW_HEIGHT * math.min(4, #results-1))
+            dropDown:SetPoint("TOPLEFT", row, "BOTTOMLEFT", 0, -2)
+            dropDown:Hide()
+
+            -- Dropdown background
+            local dropBg = dropDown:CreateTexture(nil, "BACKGROUND")
+            dropBg:SetAllPoints()
+            dropBg:SetColorTexture(0.15, 0.15, 0.15, 0.95)
+
+            -- Create rows for additional auctions
+            for i = 2, #results do
+                local dropRow = CreateFrame("Button", nil, dropDown)
+                dropRow:SetSize(dropDown:GetWidth(), ROW_HEIGHT)
+                dropRow:SetPoint("TOPLEFT", dropDown, "TOPLEFT", 0, -(i-2) * ROW_HEIGHT)
+                
+                -- Selection texture
+                local dropRowSelection = dropRow:CreateTexture(nil, "BACKGROUND")
+                dropRowSelection:SetAllPoints()
+                dropRowSelection:SetColorTexture(0.7, 0.7, 0.1, 0.2)
+                dropRowSelection:Hide()
+                dropRow.selectionTexture = dropRowSelection
+
+                -- Store auction data
+                dropRow.auctionData = {
+                    itemID = itemID,
+                    minPrice = results[i].minPrice,
+                    totalQuantity = results[i].totalQuantity,
+                    auctionID = results[i].auctionID,
+                    index = i
+                }
+
+                -- Price and quantity
+                local dropPrice = dropRow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+                dropPrice:SetPoint("CENTER", dropRow, "CENTER", 0, 0)
+                dropPrice:SetText(GetCoinTextureString(results[i].minPrice))
+                
+                local dropQuantity = dropRow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+                dropQuantity:SetPoint("RIGHT", dropRow, "RIGHT", -20, 0)
+                dropQuantity:SetText(results[i].totalQuantity)
+
+                -- Click handler for dropdown rows
+                dropRow:SetScript("OnClick", function()
+                    -- Clear any previous selections
+                    if self.selectedItem and self.selectedItem.itemID ~= itemID then
+                        self:ClearAllSelections()
+                    end
+
+                    -- Select all auctions up to this one
+                    for j = 1, dropRow.auctionData.index do
+                        if j == 1 then
+                            row.selectionTexture:Show()
+                            row.defaultBg:Hide()
+                        else
+                            local prevRow = dropDown:GetChildren()[j-1]
+                            if prevRow then
+                                prevRow.selectionTexture:Show()
+                            end
+                        end
+                    end
+                    dropRow.selectionTexture:Show()
+
+                    -- Update selected item data
+                    local totalQty = 0
+                    local totalCost = 0
+                    for j = 1, dropRow.auctionData.index do
+                        totalQty = totalQty + results[j].totalQuantity
+                        totalCost = totalCost + (results[j].minPrice * results[j].totalQuantity)
+                    end
+
+                    self.selectedItem = {
+                        itemID = itemID,
+                        totalQuantity = totalQty,
+                        minPrice = totalCost / totalQty,
+                        selected = true,
+                        selectedAuctions = {unpack(results, 1, dropRow.auctionData.index)}
+                    }
+                end)
+            end
+
+            -- Toggle dropdown on main row click
+            row:SetScript("OnClick", function()
+                if self.openDropDown and self.openDropDown ~= dropDown then
+                    self.openDropDown:Hide()
+                end
+                dropDown:SetShown(not dropDown:IsShown())
+                self.openDropDown = dropDown:IsShown() and dropDown or nil
+            end)
+        else
+            -- Single auction click handler
+            row:SetScript("OnClick", function()
+                if self.selectedItem and self.selectedItem.itemID ~= itemID then
+                    self:ClearAllSelections()
+                end
+                
+                row.itemData.selected = not row.itemData.selected
+                row.selectionTexture:SetShown(row.itemData.selected)
+                row.defaultBg:SetShown(not row.itemData.selected)
+                
+                if row.itemData.selected then
+                    self.selectedItem = row.itemData
+                else
+                    self.selectedItem = nil
+                end
+            end)
+        end
     else
         local noResultsText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         noResultsText:SetPoint("CENTER", row, "CENTER", 0, 0)
         noResultsText:SetText("No auctions found")
     end
 
-    self.scrollChild:SetHeight(self.currentScanIndex * 30)
+    self.scrollChild:SetHeight(self.currentScanIndex * (ROW_HEIGHT + 5))
 
     self.currentScanIndex = self.currentScanIndex + 1
     if self.currentScanIndex <= #self.itemIDs then
