@@ -66,6 +66,35 @@ StaticPopupDialogs["FLIPR_TEST_POPUP"] = {
     preferredIndex = 3,
 }
 
+-- Add this near the top with other StaticPopupDialogs
+StaticPopupDialogs["FLIPR_BUY_CONFIRMATION"] = {
+    text = "%s",  -- Will be replaced with item details
+    button1 = "Buy",
+    button2 = "Cancel",
+    OnShow = function(self)
+        if not self.data then return end
+        -- Format the text with item details
+        self.text:SetText(string.format(
+            "|cffffd100%s|r\nQuantity: %d\nPrice Each: %s\nTotal: %s",
+            self.data.itemName,
+            self.data.quantity,
+            GetCoinTextureString(self.data.priceEach),
+            GetCoinTextureString(self.data.total)
+        ))
+    end,
+    OnAccept = function(self)
+        if not self.data then return end
+        print("Confirming purchase of", self.data.itemName)
+        -- Call your existing purchase function
+        FLIPR:ShowConfirmDialog(self.data.itemID, self.data.quantity, self.data.priceEach)
+    end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    preferredIndex = 3,
+    showAlert = true,
+}
+
 -- Default scan items
 local defaultItems = {
     "Light Leather",
@@ -295,6 +324,26 @@ function FLIPR:CreateFLIPRTab()
     buyButton:SetHighlightTexture(buyHighlightTexture)
     buyButton:SetPushedTexture(buyPushedTexture)
     
+    -- Add the click handler here
+    buyButton:SetScript("OnClick", function()
+        print("Buy button clicked - showing test popup...")
+        
+        -- Show a simple test popup first to verify popup system works
+        StaticPopup_Show("FLIPR_TEST_POPUP")
+        
+        -- If that works, then we'll try the real popup:
+        local dialog = StaticPopup_Show("FLIPR_BUY_CONFIRMATION", "Test Item", "1", "100g")
+        if dialog then
+            dialog.data = {
+                itemName = "Test Item",
+                itemID = 1234,
+                quantity = 1,
+                priceEach = 10000,
+                total = 10000
+            }
+        end
+    end)
+
     -- Create the options section frame
     local optionsSection = CreateFrame("Frame", nil, contentFrame)
     optionsSection:SetPoint("TOPLEFT", titleSection, "BOTTOMLEFT", 0, 0)
@@ -619,6 +668,21 @@ function FLIPR:ProcessAuctionResults(results)
     nameText:SetText(itemName)
 
     if results and #results > 0 then
+        -- Add selection texture for main row (but don't show by default)
+        local selection = row:CreateTexture(nil, "BACKGROUND")
+        selection:SetAllPoints()
+        selection:SetColorTexture(0.7, 0.7, 0.1, 0.2)  -- Yellowish background
+        selection:Hide()  -- Hide by default
+        row.selectionTexture = selection  -- Store reference
+
+        -- Store the result data with the row
+        row.itemData = {
+            itemID = itemID,
+            minPrice = results[1].minPrice,
+            totalQuantity = results[1].totalQuantity,
+            selected = false  -- Not selected by default
+        }
+        
         -- Price and quantity for main row
         local priceText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         priceText:SetPoint("CENTER", row, "CENTER", 0, 0)
@@ -628,11 +692,17 @@ function FLIPR:ProcessAuctionResults(results)
         quantityText:SetPoint("RIGHT", row, "RIGHT", -25, 0)
         quantityText:SetText(results[1].totalQuantity)
 
-        -- Create dropdown container
-        local dropDown = CreateFrame("Frame", nil, rowContainer)
+        -- Create dropdown frame
+        local dropDown = CreateFrame("Frame", nil, row)
+        dropDown:SetFrameStrata("DIALOG")
         dropDown:SetSize(row:GetWidth(), ROW_HEIGHT * math.min(4, #results-1))
         dropDown:SetPoint("TOPLEFT", row, "BOTTOMLEFT", 0, -2)
         dropDown:Hide()
+
+        -- Add dropdown background (darker grey)
+        local dropBg = dropDown:CreateTexture(nil, "BACKGROUND")
+        dropBg:SetAllPoints()
+        dropBg:SetColorTexture(0.15, 0.15, 0.15, 0.95)
 
         -- Add dropdown rows
         for i = 2, math.min(5, #results) do
@@ -640,12 +710,62 @@ function FLIPR:ProcessAuctionResults(results)
             dropDownRow:SetSize(dropDown:GetWidth(), ROW_HEIGHT)
             dropDownRow:SetPoint("TOPLEFT", dropDown, "TOPLEFT", 0, -(i-2) * ROW_HEIGHT)
             
-            -- Add dropdown row content...
+            -- Add selection texture (hidden by default)
+            local dropRowSelection = dropDownRow:CreateTexture(nil, "BACKGROUND")
+            dropRowSelection:SetAllPoints()
+            dropRowSelection:SetColorTexture(0.7, 0.7, 0.1, 0.2)
+            dropRowSelection:Hide()
+            dropDownRow.selectionTexture = dropRowSelection
+            
+            -- Add highlight
+            local highlight = dropDownRow:CreateTexture(nil, "HIGHLIGHT")
+            highlight:SetAllPoints()
+            highlight:SetColorTexture(1, 1, 1, 0.1)
+            dropDownRow:SetHighlightTexture(highlight)
+            
+            -- Store auction data with the row
+            dropDownRow.auctionData = {
+                itemID = itemID,
+                minPrice = results[i].minPrice,
+                totalQuantity = results[i].totalQuantity,
+                selected = false
+            }
+            
+            -- Add price
+            local dropPrice = dropDownRow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            dropPrice:SetPoint("CENTER", dropDownRow, "CENTER", 0, 0)
+            dropPrice:SetText(GetCoinTextureString(results[i].minPrice))
+            
+            -- Add quantity
+            local dropQuantity = dropDownRow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            dropQuantity:SetPoint("RIGHT", dropDownRow, "RIGHT", -20, 0)
+            dropQuantity:SetText(results[i].totalQuantity)
+
+            -- Make rows clickable for selection
+            dropDownRow:SetScript("OnClick", function()
+                dropDownRow.auctionData.selected = not dropDownRow.auctionData.selected
+                dropDownRow.selectionTexture:SetShown(dropDownRow.auctionData.selected)
+            end)
         end
 
-        -- Toggle dropdown on click
+        -- Toggle dropdown and selection on row click
         row:SetScript("OnClick", function()
+            -- Toggle selection
+            row.itemData.selected = not row.itemData.selected
+            row.selectionTexture:SetShown(row.itemData.selected)
+
+            -- Hide all other dropdowns first
+            if self.openDropDown and self.openDropDown ~= dropDown then
+                self.openDropDown:Hide()
+            end
+            
+            -- Toggle this dropdown
             dropDown:SetShown(not dropDown:IsShown())
+            if dropDown:IsShown() then
+                self.openDropDown = dropDown
+            else
+                self.openDropDown = nil
+            end
         end)
     else
         local noResultsText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -759,6 +879,90 @@ function FLIPR:GetTableNameFromGroup(groupName)
     local tableName = "FLIPR_ItemDatabase_" .. groupName:gsub("[%.]", ""):gsub(" ", ""):gsub("[%+]", "plus")
     print(string.format("Generated table name: %s", tableName))  -- Debug print
     return tableName
+end
+
+-- Add near the top with other frame creation code
+function FLIPR:CreateBuyConfirmationFrame()
+    local frame = CreateFrame("Frame", nil, UIParent)
+    frame:SetSize(300, 150)
+    frame:SetPoint("CENTER")
+    frame:SetFrameStrata("DIALOG")
+    frame:Hide()
+    
+    -- Add background
+    local bg = frame:CreateTexture(nil, "BACKGROUND")
+    bg:SetAllPoints()
+    bg:SetColorTexture(0.1, 0.1, 0.1, 0.95)
+    
+    -- Add border
+    local border = frame:CreateTexture(nil, "BORDER")
+    border:SetAllPoints()
+    border:SetColorTexture(0.5, 0.4, 0, 0.5)
+
+    -- Title
+    local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    title:SetPoint("TOP", 0, -10)
+    title:SetText("Confirm Purchase")
+    
+    -- Item name
+    local nameText = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    nameText:SetPoint("TOPLEFT", 20, -40)
+    frame.nameText = nameText
+    
+    -- Quantity
+    local qtyText = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    qtyText:SetPoint("TOPLEFT", nameText, "BOTTOMLEFT", 0, -10)
+    frame.qtyText = qtyText
+    
+    -- Price Each
+    local priceEachText = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    priceEachText:SetPoint("TOPLEFT", qtyText, "BOTTOMLEFT", 0, -10)
+    frame.priceEachText = priceEachText
+    
+    -- Total Price
+    local totalText = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    totalText:SetPoint("TOPLEFT", priceEachText, "BOTTOMLEFT", 0, -20)
+    frame.totalText = totalText
+
+    -- Confirm Button
+    local confirmButton = CreateFrame("Button", nil, frame)
+    confirmButton:SetSize(100, 25)
+    confirmButton:SetPoint("BOTTOMRIGHT", -10, 10)
+    
+    local confirmBg = confirmButton:CreateTexture(nil, "BACKGROUND")
+    confirmBg:SetAllPoints()
+    confirmBg:SetColorTexture(0.2, 0.2, 0.2, 0.9)
+    confirmButton:SetNormalTexture(confirmBg)
+    
+    local confirmText = confirmButton:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    confirmText:SetPoint("CENTER")
+    confirmText:SetText("Buy")
+    
+    -- Cancel Button
+    local cancelButton = CreateFrame("Button", nil, frame)
+    cancelButton:SetSize(100, 25)
+    cancelButton:SetPoint("BOTTOMLEFT", 10, 10)
+    
+    local cancelBg = cancelButton:CreateTexture(nil, "BACKGROUND")
+    cancelBg:SetAllPoints()
+    cancelBg:SetColorTexture(0.2, 0.2, 0.2, 0.9)
+    cancelButton:SetNormalTexture(cancelBg)
+    
+    local cancelText = cancelButton:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    cancelText:SetPoint("CENTER")
+    cancelText:SetText("Cancel")
+    
+    -- Close on cancel
+    cancelButton:SetScript("OnClick", function()
+        print("Buy cancelled")
+        frame:Hide()
+    end)
+    
+    -- Store frame reference
+    self.buyConfirmFrame = frame
+    self.buyConfirmButton = confirmButton
+    
+    return frame
 end
 
 -- Initialize the addon
