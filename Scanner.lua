@@ -2,6 +2,9 @@ local addonName, addon = ...
 local FLIPR = addon.FLIPR
 local ROW_HEIGHT = 25
 
+FLIPR.selectedRow = nil
+FLIPR.selectedItem = nil
+
 function FLIPR:ScanItems()
     -- Get items from enabled groups
     self:UpdateScanItems()
@@ -174,31 +177,43 @@ function FLIPR:ProcessAuctionResults(results)
 
         -- Create dropdown for additional auctions
         if #results > 1 then
+            -- Create dropdown as child of row
             local dropDown = CreateFrame("Frame", nil, row)
             dropDown:SetFrameStrata("DIALOG")
-            dropDown:SetSize(row:GetWidth(), ROW_HEIGHT * math.min(4, #results-1))
+            dropDown:SetSize(row:GetWidth(), ROW_HEIGHT * (#results - 1))
             dropDown:SetPoint("TOPLEFT", row, "BOTTOMLEFT", 0, -2)
             dropDown:Hide()
 
-            -- Dropdown background
+            -- Store dropdown reference
+            row.dropDown = dropDown
+
+            -- Dropdown background (create as child of dropdown)
             local dropBg = dropDown:CreateTexture(nil, "BACKGROUND")
             dropBg:SetAllPoints()
             dropBg:SetColorTexture(0.15, 0.15, 0.15, 0.95)
 
             -- Create rows for additional auctions
+            local dropDownRows = {}
             for i = 2, #results do
+                -- Create each dropdown row as child of dropdown
                 local dropRow = CreateFrame("Button", nil, dropDown)
                 dropRow:SetSize(dropDown:GetWidth(), ROW_HEIGHT)
                 dropRow:SetPoint("TOPLEFT", dropDown, "TOPLEFT", 0, -(i-2) * ROW_HEIGHT)
                 
-                -- Selection texture
+                -- Create background for dropdown row
+                local dropRowBg = dropRow:CreateTexture(nil, "BACKGROUND")
+                dropRowBg:SetAllPoints()
+                dropRowBg:SetColorTexture(0.1, 0.1, 0.1, 0.5)
+                dropRow.defaultBg = dropRowBg
+                
+                -- Selection texture for dropdown row
                 local dropRowSelection = dropRow:CreateTexture(nil, "BACKGROUND")
                 dropRowSelection:SetAllPoints()
                 dropRowSelection:SetColorTexture(0.7, 0.7, 0.1, 0.2)
                 dropRowSelection:Hide()
                 dropRow.selectionTexture = dropRowSelection
 
-                -- Store auction data
+                dropDownRows[i] = dropRow
                 dropRow.auctionData = {
                     itemID = itemID,
                     minPrice = results[i].minPrice,
@@ -217,35 +232,48 @@ function FLIPR:ProcessAuctionResults(results)
                 dropQuantity:SetText(results[i].totalQuantity)
 
                 -- Click handler for dropdown rows
-                dropRow:SetScript("OnClick", function()
-                    -- Clear any previous selections
-                    if self.selectedItem and self.selectedItem.itemID ~= itemID then
-                        self:ClearAllSelections()
+                dropRow:SetScript("OnClick", function(self)
+                    -- Hide any other open dropdowns
+                    if FLIPR.openDropDown and FLIPR.openDropDown ~= dropDown then
+                        FLIPR.openDropDown:Hide()
+                        FLIPR.openDropDown = nil
                     end
 
-                    -- Select all auctions up to this one
-                    for j = 1, dropRow.auctionData.index do
-                        if j == 1 then
-                            row.selectionTexture:Show()
-                            row.defaultBg:Hide()
-                        else
-                            local prevRow = dropDown:GetChildren()[j-1]
-                            if prevRow then
-                                prevRow.selectionTexture:Show()
+                    -- Clear any previous selections
+                    if FLIPR.selectedRow then
+                        FLIPR.selectedRow.itemData.selected = false
+                        FLIPR.selectedRow.selectionTexture:Hide()
+                        FLIPR.selectedRow.defaultBg:Show()
+                        
+                        -- Clear previous dropdown selections
+                        if FLIPR.selectedRow.dropDown then
+                            for _, child in pairs({FLIPR.selectedRow.dropDown:GetChildren()}) do
+                                if child.selectionTexture then
+                                    child.selectionTexture:Hide()
+                                end
                             end
                         end
                     end
-                    dropRow.selectionTexture:Show()
 
-                    -- Update selected item data
+                    -- Select this item's main row
+                    row.itemData.selected = true
+                    row.selectionTexture:Show()
+                    row.defaultBg:Hide()
+                    FLIPR.selectedRow = row
+                    FLIPR.openDropDown = dropDown
+
+                    -- Show selection on all rows up to clicked one
                     local totalQty = 0
                     local totalCost = 0
                     for j = 1, dropRow.auctionData.index do
+                        if j > 1 then
+                            dropDownRows[j].selectionTexture:Show()
+                        end
                         totalQty = totalQty + results[j].totalQuantity
                         totalCost = totalCost + (results[j].minPrice * results[j].totalQuantity)
                     end
 
-                    self.selectedItem = {
+                    FLIPR.selectedItem = {
                         itemID = itemID,
                         totalQuantity = totalQty,
                         minPrice = totalCost / totalQty,
@@ -255,20 +283,56 @@ function FLIPR:ProcessAuctionResults(results)
                 end)
             end
 
-            -- Toggle dropdown on main row click
+            -- Main row click handler
             row:SetScript("OnClick", function()
-                if self.openDropDown and self.openDropDown ~= dropDown then
-                    self.openDropDown:Hide()
+                -- Hide any other open dropdowns
+                if FLIPR.openDropDown and FLIPR.openDropDown ~= dropDown then
+                    FLIPR.openDropDown:Hide()
+                    FLIPR.openDropDown = nil
                 end
+
+                -- Clear any previous selections
+                if FLIPR.selectedRow and FLIPR.selectedRow ~= row then
+                    FLIPR.selectedRow.itemData.selected = false
+                    FLIPR.selectedRow.selectionTexture:Hide()
+                    FLIPR.selectedRow.defaultBg:Show()
+                    
+                    -- Clear previous dropdown selections
+                    if FLIPR.selectedRow.dropDown then
+                        for _, child in pairs({FLIPR.selectedRow.dropDown:GetChildren()}) do
+                            if child.selectionTexture then
+                                child.selectionTexture:Hide()
+                            end
+                        end
+                    end
+                end
+
+                -- Toggle dropdown
                 dropDown:SetShown(not dropDown:IsShown())
-                self.openDropDown = dropDown:IsShown() and dropDown or nil
+                if dropDown:IsShown() then
+                    FLIPR.openDropDown = dropDown
+                else
+                    FLIPR.openDropDown = nil
+                end
+
+                -- Select this row
+                row.itemData.selected = true
+                row.selectionTexture:Show()
+                row.defaultBg:Hide()
+                FLIPR.selectedRow = row
+                FLIPR.selectedItem = {
+                    itemID = itemID,
+                    totalQuantity = results[1].totalQuantity,
+                    minPrice = results[1].minPrice,
+                    selected = true,
+                    selectedAuctions = {results[1]}
+                }
             end)
         else
             -- Single auction click handler
             row:SetScript("OnClick", function()
-                if self.selectedItem and self.selectedItem.itemID ~= itemID then
-                    self:ClearAllSelections()
-                end
+                -- Clear previous selection first
+                self:ClearAllSelections()
                 
                 row.itemData.selected = not row.itemData.selected
                 row.selectionTexture:SetShown(row.itemData.selected)
@@ -293,4 +357,25 @@ function FLIPR:ProcessAuctionResults(results)
     if self.currentScanIndex <= #self.itemIDs then
         C_Timer.After(0.5, function() self:ScanNextItem() end)
     end
+end
+
+function FLIPR:ClearAllSelections()
+    -- Clear previous selection if it exists
+    if self.selectedRow then
+        self.selectedRow.itemData.selected = false
+        self.selectedRow.selectionTexture:Hide()
+        self.selectedRow.defaultBg:Show()
+        
+        -- Clear dropdown selections if they exist
+        if self.selectedRow.dropDown then
+            for _, dropChild in pairs({self.selectedRow.dropDown:GetChildren()}) do
+                if dropChild.selectionTexture then
+                    dropChild.selectionTexture:Hide()
+                end
+            end
+        end
+    end
+    
+    self.selectedRow = nil
+    self.selectedItem = nil
 end 
