@@ -73,19 +73,18 @@ StaticPopupDialogs["FLIPR_BUY_CONFIRMATION"] = {
     button2 = "Cancel",
     OnShow = function(self)
         if not self.data then return end
-        -- Format the text with item details
+        -- Format the text directly instead of relying on format string
         self.text:SetText(string.format(
             "|cffffd100%s|r\nQuantity: %d\nPrice Each: %s\nTotal: %s",
             self.data.itemName,
             self.data.quantity,
-            GetCoinTextureString(self.data.priceEach),
-            GetCoinTextureString(self.data.total)
+            C_CurrencyInfo.GetCoinTextureString(self.data.priceEach),
+            C_CurrencyInfo.GetCoinTextureString(self.data.total)
         ))
     end,
     OnAccept = function(self)
         if not self.data then return end
         print("Confirming purchase of", self.data.itemName)
-        -- Call your existing purchase function
         FLIPR:ShowConfirmDialog(self.data.itemID, self.data.quantity, self.data.priceEach)
     end,
     timeout = 0,
@@ -326,22 +325,38 @@ function FLIPR:CreateFLIPRTab()
     
     -- Add the click handler here
     buyButton:SetScript("OnClick", function()
-        print("Buy button clicked - showing test popup...")
+        print("Buy button clicked - gathering selected items...")
         
-        -- Show a simple test popup first to verify popup system works
-        StaticPopup_Show("FLIPR_TEST_POPUP")
-        
-        -- If that works, then we'll try the real popup:
-        local dialog = StaticPopup_Show("FLIPR_BUY_CONFIRMATION", "Test Item", "1", "100g")
-        if dialog then
-            dialog.data = {
-                itemName = "Test Item",
-                itemID = 1234,
-                quantity = 1,
-                priceEach = 10000,
-                total = 10000
-            }
+        -- Create confirmation frame if it doesn't exist
+        if not self.buyConfirmFrame then
+            self.buyConfirmFrame = self:CreateBuyConfirmationFrame()
         end
+        
+        -- Check if we have a selected item
+        if not self.selectedItem then
+            print("No items selected!")
+            return
+        end
+        
+        print("Found selected item:", GetItemInfo(self.selectedItem.itemID))
+        
+        -- Create array with just the selected item
+        local selectedItems = { self.selectedItem }
+        
+        -- Update confirmation frame with item details
+        local itemName = GetItemInfo(self.selectedItem.itemID)
+        local totalQty = self.selectedItem.totalQuantity
+        local totalPrice = self.selectedItem.minPrice * totalQty
+        
+        print(string.format("Showing confirmation for %s x%d", itemName, totalQty))
+        
+        self.buyConfirmFrame.itemText:SetText("Item: " .. itemName)
+        self.buyConfirmFrame.qtyText:SetText(string.format("Quantity: %d", totalQty))
+        self.buyConfirmFrame.priceText:SetText(string.format("Price Each: %s", C_CurrencyInfo.GetCoinTextureString(self.selectedItem.minPrice)))
+        self.buyConfirmFrame.totalText:SetText(string.format("Total: %s", C_CurrencyInfo.GetCoinTextureString(totalPrice)))
+        
+        -- Show the frame
+        self.buyConfirmFrame:Show()
     end)
 
     -- Create the options section frame
@@ -657,10 +672,18 @@ function FLIPR:ProcessAuctionResults(results)
     local row = CreateFrame("Button", nil, rowContainer)
     row:SetAllPoints(rowContainer)
     
-    -- Background
-    local bg = row:CreateTexture(nil, "BACKGROUND")
-    bg:SetAllPoints()
-    bg:SetColorTexture(0.1, 0.1, 0.1, 0.5)
+    -- Default background (dark)
+    local defaultBg = row:CreateTexture(nil, "BACKGROUND")
+    defaultBg:SetAllPoints()
+    defaultBg:SetColorTexture(0.1, 0.1, 0.1, 0.5)
+    row.defaultBg = defaultBg
+
+    -- Selection background (yellow)
+    local selection = row:CreateTexture(nil, "BACKGROUND")
+    selection:SetAllPoints()
+    selection:SetColorTexture(0.7, 0.7, 0.1, 0.2)
+    selection:Hide()
+    row.selectionTexture = selection
 
     -- Item name
     local nameText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -668,13 +691,6 @@ function FLIPR:ProcessAuctionResults(results)
     nameText:SetText(itemName)
 
     if results and #results > 0 then
-        -- Add selection texture for main row (but don't show by default)
-        local selection = row:CreateTexture(nil, "BACKGROUND")
-        selection:SetAllPoints()
-        selection:SetColorTexture(0.7, 0.7, 0.1, 0.2)  -- Yellowish background
-        selection:Hide()  -- Hide by default
-        row.selectionTexture = selection  -- Store reference
-
         -- Store the result data with the row
         row.itemData = {
             itemID = itemID,
@@ -750,16 +766,13 @@ function FLIPR:ProcessAuctionResults(results)
 
         -- Toggle dropdown and selection on row click
         row:SetScript("OnClick", function()
-            -- Toggle selection
-            row.itemData.selected = not row.itemData.selected
-            row.selectionTexture:SetShown(row.itemData.selected)
-
-            -- Hide all other dropdowns first
+            -- Select this row and handle dropdown visibility
+            self:SelectItem(row)
+            
+            -- Toggle dropdown
             if self.openDropDown and self.openDropDown ~= dropDown then
                 self.openDropDown:Hide()
             end
-            
-            -- Toggle this dropdown
             dropDown:SetShown(not dropDown:IsShown())
             if dropDown:IsShown() then
                 self.openDropDown = dropDown
@@ -883,86 +896,135 @@ end
 
 -- Add near the top with other frame creation code
 function FLIPR:CreateBuyConfirmationFrame()
-    local frame = CreateFrame("Frame", nil, UIParent)
-    frame:SetSize(300, 150)
+    -- Create main frame
+    local frame = CreateFrame("Frame", "FLIPRBuyConfirmFrame", UIParent)
+    frame:SetSize(300, 200)
     frame:SetPoint("CENTER")
     frame:SetFrameStrata("DIALOG")
-    frame:Hide()
+    frame:EnableMouse(true)  -- Make it interactive
     
-    -- Add background
+    -- Create solid background
     local bg = frame:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints()
-    bg:SetColorTexture(0.1, 0.1, 0.1, 0.95)
+    bg:SetColorTexture(0, 0, 0, 0.9)  -- Almost black background
     
-    -- Add border
+    -- Create border
     local border = frame:CreateTexture(nil, "BORDER")
-    border:SetAllPoints()
-    border:SetColorTexture(0.5, 0.4, 0, 0.5)
-
-    -- Title
+    border:SetPoint("TOPLEFT", -1, 1)
+    border:SetPoint("BOTTOMRIGHT", 1, -1)
+    border:SetColorTexture(0.6, 0.6, 0.6, 0.6)  -- Gray border
+    
+    -- Add title text
     local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    title:SetPoint("TOP", 0, -10)
-    title:SetText("Confirm Purchase")
+    title:SetPoint("TOP", 0, -15)
+    title:SetText("Purchase Confirmation")
     
-    -- Item name
-    local nameText = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    nameText:SetPoint("TOPLEFT", 20, -40)
-    frame.nameText = nameText
+    -- Add item details
+    frame.itemText = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    frame.itemText:SetPoint("TOPLEFT", 20, -50)
     
-    -- Quantity
-    local qtyText = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    qtyText:SetPoint("TOPLEFT", nameText, "BOTTOMLEFT", 0, -10)
-    frame.qtyText = qtyText
+    frame.qtyText = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    frame.qtyText:SetPoint("TOPLEFT", 20, -70)
     
-    -- Price Each
-    local priceEachText = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    priceEachText:SetPoint("TOPLEFT", qtyText, "BOTTOMLEFT", 0, -10)
-    frame.priceEachText = priceEachText
+    frame.priceText = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    frame.priceText:SetPoint("TOPLEFT", 20, -90)
     
-    -- Total Price
-    local totalText = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    totalText:SetPoint("TOPLEFT", priceEachText, "BOTTOMLEFT", 0, -20)
-    frame.totalText = totalText
-
-    -- Confirm Button
-    local confirmButton = CreateFrame("Button", nil, frame)
-    confirmButton:SetSize(100, 25)
-    confirmButton:SetPoint("BOTTOMRIGHT", -10, 10)
+    frame.totalText = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    frame.totalText:SetPoint("TOPLEFT", 20, -120)
     
-    local confirmBg = confirmButton:CreateTexture(nil, "BACKGROUND")
-    confirmBg:SetAllPoints()
-    confirmBg:SetColorTexture(0.2, 0.2, 0.2, 0.9)
-    confirmButton:SetNormalTexture(confirmBg)
-    
-    local confirmText = confirmButton:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    confirmText:SetPoint("CENTER")
-    confirmText:SetText("Buy")
-    
-    -- Cancel Button
-    local cancelButton = CreateFrame("Button", nil, frame)
-    cancelButton:SetSize(100, 25)
-    cancelButton:SetPoint("BOTTOMLEFT", 10, 10)
-    
-    local cancelBg = cancelButton:CreateTexture(nil, "BACKGROUND")
-    cancelBg:SetAllPoints()
-    cancelBg:SetColorTexture(0.2, 0.2, 0.2, 0.9)
-    cancelButton:SetNormalTexture(cancelBg)
-    
-    local cancelText = cancelButton:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    cancelText:SetPoint("CENTER")
-    cancelText:SetText("Cancel")
-    
-    -- Close on cancel
-    cancelButton:SetScript("OnClick", function()
-        print("Buy cancelled")
+    -- Add buttons
+    local buyButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    buyButton:SetSize(100, 22)
+    buyButton:SetPoint("BOTTOMRIGHT", -20, 20)
+    buyButton:SetText("Buy")
+    buyButton:SetScript("OnClick", function()
+        if not self.selectedItem then return end
+        
+        local itemID = self.selectedItem.itemID
+        local quantity = self.selectedItem.totalQuantity
+        local unitPrice = self.selectedItem.minPrice
+        local isCommodity = self:IsCommodityItem(itemID)
+        
+        print("Starting purchase of", GetItemInfo(itemID))
+        
+        if isCommodity then
+            print("Purchasing commodity:", quantity, "at", unitPrice, "each")
+            C_AuctionHouse.StartCommoditiesPurchase(itemID, quantity)
+            
+            -- Register for the throttled system ready event
+            self:RegisterEvent("AUCTION_HOUSE_THROTTLED_SYSTEM_READY", function()
+                print("System ready, confirming purchase...")
+                C_AuctionHouse.ConfirmCommoditiesPurchase(itemID, quantity)
+                self:UnregisterEvent("AUCTION_HOUSE_THROTTLED_SYSTEM_READY")
+            end)
+        else
+            print("Placing bid for item")
+            C_AuctionHouse.PlaceBid(self.selectedItem.auctionID, unitPrice * quantity)
+        end
+        
         frame:Hide()
     end)
+    frame.buyButton = buyButton
     
-    -- Store frame reference
-    self.buyConfirmFrame = frame
-    self.buyConfirmButton = confirmButton
+    local cancelButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    cancelButton:SetSize(100, 22)
+    cancelButton:SetPoint("BOTTOMLEFT", 20, 20)
+    cancelButton:SetText("Cancel")
+    cancelButton:SetScript("OnClick", function() frame:Hide() end)
     
+    frame:Hide()
     return frame
+end
+
+-- Add near the top of the file
+function FLIPR:ClearAllSelections()
+    print("ClearAllSelections called")
+    -- Store current selection as old selection before clearing
+    self.oldSelectedItem = self.selectedItem
+    
+    -- Reset old selection's visuals if it exists
+    if self.oldSelectedItem then
+        print("Resetting old selection:", GetItemInfo(self.oldSelectedItem.itemID))
+        for _, child in pairs({self.scrollChild:GetChildren()}) do
+            if child.itemData and child.itemData.itemID == self.oldSelectedItem.itemID then
+                child.itemData.selected = false
+                if child.selectionTexture then
+                    child.selectionTexture:Hide()
+                end
+                if child.defaultBg then
+                    child.defaultBg:Show()
+                end
+                break
+            end
+        end
+    end
+    
+    self.selectedItem = nil
+    print("selectedItem cleared to nil")
+end
+
+-- Add this helper function to handle selections
+function FLIPR:SelectItem(row, dropDownRows)
+    print("SelectItem called for:", GetItemInfo(row.itemData.itemID))
+    
+    -- If there's a currently selected row, clear its selection first
+    if self.selectedRow then
+        print("Clearing previous selection:", GetItemInfo(self.selectedRow.itemData.itemID))
+        self.selectedRow.itemData.selected = false
+        self.selectedRow.selectionTexture:Hide()
+        self.selectedRow.defaultBg:Show()
+    end
+    
+    -- Select the new row
+    row.itemData.selected = true
+    row.defaultBg:Hide()
+    row.selectionTexture:Show()
+    
+    -- Store references to both the row and its data
+    self.selectedRow = row
+    self.selectedItem = row.itemData
+    
+    print("New selection set to:", GetItemInfo(self.selectedItem.itemID))
 end
 
 -- Initialize the addon
