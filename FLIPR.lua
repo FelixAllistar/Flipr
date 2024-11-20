@@ -502,6 +502,15 @@ end
 -- Rename event handlers to match registration
 function FLIPR:OnCommoditySearchResults()
     local itemID = self.itemIDs[self.currentScanIndex]
+    if not itemID then return end  -- Safety check
+    
+    -- Check if item is actually a commodity
+    local itemInfo = C_AuctionHouse.GetItemKeyInfo(C_AuctionHouse.MakeItemKey(itemID))
+    if not itemInfo or not itemInfo.isCommodity then
+        -- Not a commodity, skip processing
+        return
+    end
+    
     local numResults = C_AuctionHouse.GetNumCommoditySearchResults(itemID)
     
     if numResults and numResults > 0 then
@@ -513,7 +522,7 @@ function FLIPR:OnCommoditySearchResults()
                     itemName = GetItemInfo(itemID),
                     minPrice = result.unitPrice,
                     totalQuantity = result.quantity,
-                    itemID = itemID -- Add itemID to the result
+                    itemID = itemID
                 })
             end
         end
