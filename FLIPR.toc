@@ -1,24 +1,25 @@
 ## Interface: 100200
 ## Title: FLIPR
-## Notes: Adds a FLIPR tab to the Auction House for scanning specific items
-## Author: Your Name
-## Version: v0.069
-## SavedVariables: FLIPRSettings
-## Dependencies: Blizzard_AuctionHouseUI
+## Notes: Auction House Flipping Helper
+## Author: YourName
+## Version: 0.070
 
-# Data files (must load first)
+# Libraries
+Libs\LibStub\LibStub.lua
+Libs\AceAddon-3.0\AceAddon-3.0.xml
+Libs\AceEvent-3.0\AceEvent-3.0.xml
+Libs\AceHook-3.0\AceHook-3.0.xml
+
+# Data files (add these before core files)
 Data_1.Very_High_10000plus.lua
 Data_2.High_1000plus.lua
 Data_3.Medium_100plus.lua
 Data_4.Low_10plus.lua
 Data_5.Very_low_1plus.lua
 
-# Libraries
-Libs\LibStub\LibStub.lua
-Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
-Libs\AceAddon-3.0\AceAddon-3.0.lua
-Libs\AceEvent-3.0\AceEvent-3.0.lua
-Libs\AceHook-3.0\AceHook-3.0.lua
-
 # Core files
-FLIPR.lua 
+Core.lua
+Database.lua
+UI.lua
+Scanner.lua
+Purchase.lua 
