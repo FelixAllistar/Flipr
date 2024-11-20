@@ -2,7 +2,7 @@
 ## Title: FLIPR
 ## Notes: Auction House Flipping Helper
 ## Author: YourName
-## Version: 0.070
+## Version: 0.069
 
 # Libraries
 Libs\LibStub\LibStub.lua

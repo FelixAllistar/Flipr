@@ -4,14 +4,61 @@ local ROW_HEIGHT = 25
 
 FLIPR.selectedRow = nil
 FLIPR.selectedItem = nil
+FLIPR.isScanning = false
+FLIPR.isPaused = false
+FLIPR.scanButton = nil
 
 function FLIPR:ScanItems()
+    -- If paused, resume scanning
+    if self.isPaused then
+        self.isPaused = false
+        self.isScanning = true
+        if self.scanButton then
+            self.scanButton:SetText("Pause Scan")
+            self.scanButton.buttonText:SetText("Pause Scan")
+        end
+        self:ScanNextItem()
+        return
+    end
+
+    -- If scanning, pause it
+    if self.isScanning then
+        self.isPaused = true
+        self.isScanning = false
+        if self.scanButton then
+            self.scanButton:SetText("Resume Scan")
+            self.scanButton.buttonText:SetText("Resume Scan")
+        end
+        return
+    end
+
+    -- Start new scan
+    self.isScanning = true
+    self.isPaused = false
+    if self.scanButton then
+        self.scanButton:SetText("Pause Scan")
+        self.scanButton.buttonText:SetText("Pause Scan")
+    end
+
     -- Get items from enabled groups
     self:UpdateScanItems()
     
     if #self.itemIDs == 0 then
         print("No groups selected!")
+        self.isScanning = false
+        if self.scanButton then
+            self.scanButton:SetText("Scan Items")
+            self.scanButton.buttonText:SetText("Scan Items")
+        end
+        if self.scanProgressText then
+            self.scanProgressText:SetText("")
+        end
         return
+    end
+
+    -- Update initial progress
+    if self.scanProgressText then
+        self.scanProgressText:SetText(string.format("0/%d items", #self.itemIDs))
     end
 
     -- Track current item being scanned
@@ -29,6 +76,11 @@ function FLIPR:ScanItems()
 end
 
 function FLIPR:ScanNextItem()
+    -- Check if scan was cancelled
+    if not self.isScanning then
+        return
+    end
+
     if self.currentScanIndex <= #self.itemIDs then
         local itemID = self.itemIDs[self.currentScanIndex]
 
@@ -58,7 +110,22 @@ function FLIPR:ScanNextItem()
             C_AuctionHouse.SendSearchQuery(itemKey, {}, true)
         end
     else
-        -- Scanning complete
+        -- Scan complete
+        self.isScanning = false
+        if self.scanButton then
+            self.scanButton:SetText("Scan Items")
+            self.scanButton.buttonText:SetText("Scan Items")
+        end
+        
+        if self.scanProgressText then
+            self.scanProgressText:SetText("Complete!")
+            C_Timer.After(2, function()
+                if not self.isScanning then
+                    self.scanProgressText:SetText("")
+                end
+            end)
+        end
+        
         if self.isEventRegistered then
             self:UnregisterEvent("COMMODITY_SEARCH_RESULTS_UPDATED")
             self:UnregisterEvent("ITEM_SEARCH_RESULTS_UPDATED")
@@ -356,6 +423,11 @@ function FLIPR:ProcessAuctionResults(results)
     self.currentScanIndex = self.currentScanIndex + 1
     if self.currentScanIndex <= #self.itemIDs then
         C_Timer.After(0.5, function() self:ScanNextItem() end)
+    end
+
+    -- After processing results, update progress text
+    if self.scanProgressText then
+        self.scanProgressText:SetText(string.format("%d/%d items", self.currentScanIndex, #self.itemIDs))
     end
 end
 

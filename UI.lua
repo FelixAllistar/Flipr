@@ -83,30 +83,34 @@ function FLIPR:CreateTitleSection(contentFrame)
     local normalTexture = scanButton:CreateTexture(nil, "BACKGROUND")
     normalTexture:SetAllPoints()
     normalTexture:SetColorTexture(0.2, 0.2, 0.2, 0.9)
-    
+
     local highlightTexture = scanButton:CreateTexture(nil, "HIGHLIGHT")
     highlightTexture:SetAllPoints()
     highlightTexture:SetColorTexture(0.3, 0.3, 0.3, 0.9)
-    
+
     local pushedTexture = scanButton:CreateTexture(nil, "BACKGROUND")
     pushedTexture:SetAllPoints()
     pushedTexture:SetColorTexture(0.15, 0.15, 0.15, 0.9)
-    
+
     -- Add button border
     local border = scanButton:CreateTexture(nil, "BORDER")
     border:SetAllPoints()
     border:SetColorTexture(0.5, 0.4, 0, 0.5)
     
+    -- Set button textures
+    scanButton:SetNormalTexture(normalTexture)
+    scanButton:SetHighlightTexture(highlightTexture)
+    scanButton:SetPushedTexture(pushedTexture)
+    
+    -- Store reference to button
+    self.scanButton = scanButton
+
     -- Create button text
     local buttonText = scanButton:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     buttonText:SetPoint("CENTER", scanButton, "CENTER", 0, 0)
     buttonText:SetText("Scan Items")
     buttonText:SetTextColor(1, 0.82, 0, 1)
-    
-    -- Set button textures
-    scanButton:SetNormalTexture(normalTexture)
-    scanButton:SetHighlightTexture(highlightTexture)
-    scanButton:SetPushedTexture(pushedTexture)
+    scanButton.buttonText = buttonText  -- Store reference to text
     
     -- Add click handler
     scanButton:SetScript("OnClick", function() self:ScanItems() end)
@@ -119,6 +123,13 @@ function FLIPR:CreateTitleSection(contentFrame)
     scanButton:SetScript("OnLeave", function()
         buttonText:SetTextColor(1, 0.82, 0, 1)
     end)
+
+    -- Add progress text
+    local progressText = titleSection:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    progressText:SetPoint("LEFT", scanButton, "RIGHT", 10, 0)
+    progressText:SetText("")  -- Start empty
+    progressText:SetTextColor(0.7, 0.7, 0.7, 1)
+    self.scanProgressText = progressText  -- Store reference
 
     -- Create title text
     local titleText = titleSection:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
