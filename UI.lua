@@ -2,6 +2,9 @@ local addonName, addon = ...
 local FLIPR = addon.FLIPR
 local ROW_HEIGHT = 25
 
+FLIPR.scanTimer = 0
+FLIPR.scanStartTime = 0
+
 function FLIPR:OnEnable()
     self:RegisterEvent("AUCTION_HOUSE_SHOW", "OnAuctionHouseShow")
 end
@@ -130,6 +133,44 @@ function FLIPR:CreateTitleSection(contentFrame)
     progressText:SetText("")  -- Start empty
     progressText:SetTextColor(0.7, 0.7, 0.7, 1)
     self.scanProgressText = progressText  -- Store reference
+
+    -- Add timer text
+    local timerText = titleSection:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    timerText:SetPoint("LEFT", progressText, "RIGHT", 10, 0)
+    timerText:SetText("")
+    timerText:SetTextColor(0.7, 0.7, 0.7, 1)
+    self.scanTimerText = timerText
+
+    -- Create OnUpdate handler for the timer
+    local timerFrame = CreateFrame("Frame")
+    timerFrame:Hide()
+    timerFrame:SetScript("OnUpdate", function(self, elapsed)
+        if FLIPR.isScanning and not FLIPR.isPaused then
+            FLIPR.scanTimer = GetTime() - FLIPR.scanStartTime
+            local minutes = math.floor(FLIPR.scanTimer / 60)
+            local seconds = math.floor(FLIPR.scanTimer % 60)
+            FLIPR.scanTimerText:SetText(string.format("Time: %d:%02d", minutes, seconds))
+        end
+    end)
+    self.timerFrame = timerFrame
+
+    -- Modify scan button click handler to handle timer
+    scanButton:SetScript("OnClick", function() 
+        if not FLIPR.isScanning then
+            -- Starting new scan
+            FLIPR.scanStartTime = GetTime()
+            FLIPR.scanTimer = 0
+            timerFrame:Show()
+        elseif FLIPR.isPaused then
+            -- Resuming scan
+            FLIPR.scanStartTime = GetTime() - FLIPR.scanTimer
+            timerFrame:Show()
+        else
+            -- Pausing scan
+            timerFrame:Hide()
+        end
+        FLIPR:ScanItems() 
+    end)
 
     -- Create title text
     local titleText = titleSection:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")

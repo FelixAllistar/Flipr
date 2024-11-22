@@ -7,6 +7,9 @@ FLIPR.selectedItem = nil
 FLIPR.isScanning = false
 FLIPR.isPaused = false
 FLIPR.scanButton = nil
+FLIPR.failedItems = {}
+FLIPR.maxRetries = 3
+FLIPR.retryDelay = 2 -- seconds
 
 function FLIPR:ScanItems()
     -- If paused, resume scanning
@@ -81,13 +84,61 @@ function FLIPR:ScanNextItem()
         return
     end
 
+    -- First handle any failed items that need retry
+    if self.failedItems and #self.failedItems > 0 then
+        local failedItem = self.failedItems[1]
+        if not failedItem or not failedItem.itemID then
+            tremove(self.failedItems, 1)
+            C_Timer.After(0.1, function() self:ScanNextItem() end)
+            return
+        end
+        
+        -- Wait for throttle
+        if not C_AuctionHouse.IsThrottledMessageSystemReady() then
+            C_Timer.After(0.5, function() self:ScanNextItem() end)
+            return
+        end
+
+        -- Only remove and process if we're ready to send query
+        if failedItem.retries < self.maxRetries then
+            tremove(self.failedItems, 1)
+            failedItem.retries = failedItem.retries + 1
+            
+            if failedItem.isCommodity then
+                pcall(function()
+                    C_AuctionHouse.SendSearchQuery(nil, {}, true, failedItem.itemID)
+                end)
+            else
+                local itemKey = C_AuctionHouse.MakeItemKey(failedItem.itemID)
+                if itemKey then
+                    pcall(function()
+                        C_AuctionHouse.SendSearchQuery(itemKey, {}, true)
+                    end)
+                end
+            end
+            return
+        else
+            tremove(self.failedItems, 1)
+        end
+        
+        C_Timer.After(0.1, function() self:ScanNextItem() end)
+        return
+    end
+
+    -- Continue with normal scanning
     if self.currentScanIndex <= #self.itemIDs then
+        -- Wait for throttle
+        if not C_AuctionHouse.IsThrottledMessageSystemReady() then
+            C_Timer.After(0.5, function() self:ScanNextItem() end)
+            return
+        end
+
         local itemID = self.itemIDs[self.currentScanIndex]
+        print("Scanning item:", itemID)
 
         -- Wait for item info to be available
-        local itemName, _, _, _, _, itemClass, itemSubClass = GetItemInfo(itemID)
+        local itemName, _, _, _, _, itemClass = GetItemInfo(itemID)
         if not itemName then
-            -- Request item info and wait for it
             local item = Item:CreateFromItemID(itemID)
             item:ContinueOnItemLoad(function()
                 self:ScanNextItem()
@@ -95,13 +146,16 @@ function FLIPR:ScanNextItem()
             return
         end
 
-        -- Check if item is likely a commodity based on its class
+        -- Check if item is likely a commodity
         local isCommodity = (
             itemClass == Enum.ItemClass.Consumable or
             itemClass == Enum.ItemClass.Reagent or
             itemClass == Enum.ItemClass.TradeGoods or
             itemClass == Enum.ItemClass.Recipe
         )
+        
+        -- Increment scan index before sending query
+        self.currentScanIndex = self.currentScanIndex + 1
         
         if isCommodity then
             C_AuctionHouse.SendSearchQuery(nil, {}, true, itemID)
@@ -135,62 +189,86 @@ function FLIPR:ScanNextItem()
 end
 
 function FLIPR:OnCommoditySearchResults()
-    local itemID = self.itemIDs[self.currentScanIndex]
+    -- Get the current item ID from the previous scan index since we incremented already
+    local itemID = self.itemIDs[self.currentScanIndex - 1]
     if not itemID then return end
     
+    local numResults = C_AuctionHouse.GetNumCommoditySearchResults(itemID)
+    
+    if not numResults or numResults == 0 then
+        -- Add to retry queue
+        table.insert(self.failedItems, {
+            itemID = itemID,
+            isCommodity = true,
+            retries = 0
+        })
+        C_Timer.After(self.retryDelay, function()
+            self:ScanNextItem()
+        end)
+        return
+    end
+
     local itemInfo = C_AuctionHouse.GetItemKeyInfo(C_AuctionHouse.MakeItemKey(itemID))
     if not itemInfo or not itemInfo.isCommodity then
         return
     end
     
-    local numResults = C_AuctionHouse.GetNumCommoditySearchResults(itemID)
-    
-    if numResults and numResults > 0 then
-        local processedResults = {}
-        for i = 1, numResults do
-            local result = C_AuctionHouse.GetCommoditySearchResultInfo(itemID, i)
-            if result then
-                table.insert(processedResults, {
-                    itemName = GetItemInfo(itemID),
-                    minPrice = result.unitPrice,
-                    totalQuantity = result.quantity,
-                    itemID = itemID
-                })
-            end
+    local processedResults = {}
+    for i = 1, numResults do
+        local result = C_AuctionHouse.GetCommoditySearchResultInfo(itemID, i)
+        if result then
+            table.insert(processedResults, {
+                itemName = GetItemInfo(itemID),
+                minPrice = result.unitPrice,
+                totalQuantity = result.quantity,
+                itemID = itemID
+            })
         end
-        self:ProcessAuctionResults(processedResults)
-    else
-        self:ProcessAuctionResults({})
     end
+    self:ProcessAuctionResults(processedResults)
+    self:ScanNextItem()
 end
 
 function FLIPR:OnItemSearchResults()
-    local itemID = self.itemIDs[self.currentScanIndex]
+    -- Get the current item ID from the previous scan index since we incremented already
+    local itemID = self.itemIDs[self.currentScanIndex - 1]
+    if not itemID then return end
+    
     local itemKey = C_AuctionHouse.MakeItemKey(itemID)
     local numResults = C_AuctionHouse.GetNumItemSearchResults(itemKey)
     
-    if numResults and numResults > 0 then
-        local processedResults = {}
-        for i = 1, numResults do
-            local result = C_AuctionHouse.GetItemSearchResultInfo(itemKey, i)
-            if result then
-                table.insert(processedResults, {
-                    itemName = GetItemInfo(itemID),
-                    minPrice = result.buyoutAmount or result.bidAmount,
-                    totalQuantity = 1,
-                    itemID = itemID,
-                    auctionID = result.auctionID
-                })
-            end
-        end
-        self:ProcessAuctionResults(processedResults)
-    else
-        self:ProcessAuctionResults({})
+    if not numResults or numResults == 0 then
+        -- Add to retry queue
+        table.insert(self.failedItems, {
+            itemID = itemID,
+            isCommodity = false,
+            retries = 0
+        })
+        C_Timer.After(self.retryDelay, function()
+            self:ScanNextItem()
+        end)
+        return
     end
+
+    local processedResults = {}
+    for i = 1, numResults do
+        local result = C_AuctionHouse.GetItemSearchResultInfo(itemKey, i)
+        if result then
+            table.insert(processedResults, {
+                itemName = GetItemInfo(itemID),
+                minPrice = result.buyoutAmount or result.bidAmount,
+                totalQuantity = 1,
+                itemID = itemID,
+                auctionID = result.auctionID
+            })
+        end
+    end
+    self:ProcessAuctionResults(processedResults)
+    self:ScanNextItem()
 end
 
 function FLIPR:ProcessAuctionResults(results)
-    local itemID = self.itemIDs[self.currentScanIndex]
+    local itemID = self.itemIDs[self.currentScanIndex - 1]
     local itemName = GetItemInfo(itemID)
     
     if not itemName then return end
@@ -198,7 +276,15 @@ function FLIPR:ProcessAuctionResults(results)
     -- Create row for this item
     local rowContainer = CreateFrame("Frame", nil, self.scrollChild)
     rowContainer:SetSize(self.scrollChild:GetWidth(), ROW_HEIGHT)
-    rowContainer:SetPoint("TOPLEFT", self.scrollChild, "TOPLEFT", 0, -(self.currentScanIndex - 1) * (ROW_HEIGHT + 5))
+    
+    -- Get number of existing rows and subtract 1 to start at 0
+    local numExistingRows = select("#", self.scrollChild:GetChildren()) - 1
+    
+    -- Position based on number of existing rows, starting at 0
+    rowContainer:SetPoint("TOPLEFT", self.scrollChild, "TOPLEFT", 0, -(numExistingRows * ROW_HEIGHT))
+
+    -- Update scroll child height (keep the +1 here)
+    self.scrollChild:SetHeight((numExistingRows + 1) * ROW_HEIGHT)
 
     -- Main row
     local row = CreateFrame("Button", nil, rowContainer)
