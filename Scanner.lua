@@ -189,12 +189,11 @@ function FLIPR:ScanNextItem()
 end
 
 function FLIPR:OnCommoditySearchResults()
-    -- Get the current item ID from the previous scan index since we incremented already
     local itemID = self.itemIDs[self.currentScanIndex - 1]
     if not itemID then return end
     
+    -- First check if we have any results at all
     local numResults = C_AuctionHouse.GetNumCommoditySearchResults(itemID)
-    
     if not numResults or numResults == 0 then
         -- Add to retry queue
         table.insert(self.failedItems, {
@@ -208,11 +207,19 @@ function FLIPR:OnCommoditySearchResults()
         return
     end
 
+    -- Check if we have all results yet
+    if not C_AuctionHouse.HasFullCommoditySearchResults(itemID) then
+        print("Requesting more results for item:", itemID)
+        C_AuctionHouse.RequestMoreCommoditySearchResults(itemID)
+        return  -- Wait for another COMMODITY_SEARCH_RESULTS_UPDATED event
+    end
+
     local itemInfo = C_AuctionHouse.GetItemKeyInfo(C_AuctionHouse.MakeItemKey(itemID))
     if not itemInfo or not itemInfo.isCommodity then
         return
     end
     
+    print("Processing all results for item:", itemID)
     local processedResults = {}
     for i = 1, numResults do
         local result = C_AuctionHouse.GetCommoditySearchResultInfo(itemID, i)
@@ -225,6 +232,7 @@ function FLIPR:OnCommoditySearchResults()
             })
         end
     end
+    
     self:ProcessAuctionResults(processedResults)
     self:ScanNextItem()
 end
