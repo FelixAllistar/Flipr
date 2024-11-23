@@ -190,7 +190,11 @@ end
 
 function FLIPR:OnCommoditySearchResults()
     local itemID = self.itemIDs[self.currentScanIndex - 1]
-    if not itemID then return end
+    if not itemID then 
+        -- This might be a rescan of a specific item
+        itemID = self.selectedItem and self.selectedItem.itemID
+        if not itemID then return end
+    end
     
     -- First check if we have any results at all
     local numResults = C_AuctionHouse.GetNumCommoditySearchResults(itemID)
@@ -238,9 +242,12 @@ function FLIPR:OnCommoditySearchResults()
 end
 
 function FLIPR:OnItemSearchResults()
-    -- Get the current item ID from the previous scan index since we incremented already
     local itemID = self.itemIDs[self.currentScanIndex - 1]
-    if not itemID then return end
+    if not itemID then 
+        -- This might be a rescan of a specific item
+        itemID = self.selectedItem and self.selectedItem.itemID
+        if not itemID then return end
+    end
     
     local itemKey = C_AuctionHouse.MakeItemKey(itemID)
     local numResults = C_AuctionHouse.GetNumItemSearchResults(itemKey)
@@ -379,8 +386,68 @@ function FLIPR:ProcessAuctionResults(results)
                     dropDown:SetSize(row:GetWidth(), ROW_HEIGHT * (#results - 1))
                     dropDown:SetPoint("TOPLEFT", row, "BOTTOMLEFT", 0, -2)
                     
-                    -- Create dropdown rows...
-                    -- (Previous dropdown creation code here)
+                    -- Dropdown background
+                    local dropBg = dropDown:CreateTexture(nil, "BACKGROUND")
+                    dropBg:SetAllPoints()
+                    dropBg:SetColorTexture(0.1, 0.1, 0.1, 0.95)
+                    
+                    -- Create rows for additional auctions
+                    for i = 1, #results do
+                        local dropRow = CreateFrame("Button", nil, dropDown)
+                        dropRow:SetSize(dropDown:GetWidth(), ROW_HEIGHT)
+                        dropRow:SetPoint("TOPLEFT", dropDown, "TOPLEFT", 0, -(i-1) * ROW_HEIGHT)
+                        
+                        -- Background for dropdown row
+                        local dropRowBg = dropRow:CreateTexture(nil, "BACKGROUND")
+                        dropRowBg:SetAllPoints()
+                        dropRowBg:SetColorTexture(0.1, 0.1, 0.1, 0.5)
+                        dropRow.defaultBg = dropRowBg
+                        
+                        -- Selection texture for dropdown row
+                        local dropRowSelection = dropRow:CreateTexture(nil, "BACKGROUND")
+                        dropRowSelection:SetAllPoints()
+                        dropRowSelection:SetColorTexture(0.7, 0.7, 0.1, 0.2)
+                        dropRowSelection:Hide()
+                        dropRow.selectionTexture = dropRowSelection
+                        
+                        -- Price text
+                        local dropPrice = dropRow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+                        dropPrice:SetPoint("LEFT", dropRow, "LEFT", 5, 0)
+                        dropPrice:SetText(GetCoinTextureString(results[i].minPrice))
+                        
+                        -- Quantity text
+                        local dropQuantity = dropRow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+                        dropQuantity:SetPoint("RIGHT", dropRow, "RIGHT", -5, 0)
+                        dropQuantity:SetText("Qty: " .. results[i].totalQuantity)
+                        
+                        -- Store auction data with the row
+                        dropRow.auctionData = {
+                            itemID = itemID,
+                            minPrice = results[i].minPrice,
+                            totalQuantity = results[i].totalQuantity,
+                            auctionID = results[i].auctionID,
+                            index = i
+                        }
+                        
+                        -- Click handler for dropdown rows
+                        dropRow:SetScript("OnClick", function(self)
+                            -- Clear previous dropdown selections
+                            for _, child in pairs({dropDown:GetChildren()}) do
+                                if child.selectionTexture then
+                                    child.selectionTexture:Hide()
+                                end
+                            end
+                            
+                            -- Show selection for this row
+                            self.selectionTexture:Show()
+                            
+                            -- Update selected item data
+                            row.itemData.minPrice = self.auctionData.minPrice
+                            row.itemData.totalQuantity = self.auctionData.totalQuantity
+                            row.itemData.auctionID = self.auctionData.auctionID
+                            FLIPR.selectedItem = row.itemData
+                        end)
+                    end
                     
                     row.dropDown = dropDown
                 end
@@ -441,93 +508,195 @@ function FLIPR:GetMaxInventoryForSaleRate(saleRate)
 end
 
 function FLIPR:GetCurrentInventory(itemID)
-    -- Get total count across bags and bank
-    -- true = include bank, nil = don't include charges
-    return GetItemCount(itemID, true)
+    -- Get inventory count (bags + bank)
+    local inventoryCount = GetItemCount(itemID, true)
+    
+    -- Get count of items we have listed
+    local auctionCount = 0
+    local numOwnedAuctions = C_AuctionHouse.GetNumOwnedAuctions()
+    
+    for i = 1, numOwnedAuctions do
+        local auctionInfo = C_AuctionHouse.GetOwnedAuctionInfo(i)
+        if auctionInfo and auctionInfo.itemKey.itemID == itemID then
+            -- For commodities, quantity is per auction
+            -- For items, each auction is quantity 1
+            auctionCount = auctionCount + (auctionInfo.quantity or 1)
+        end
+    end
+    
+    -- Return total of inventory + listed auctions
+    return inventoryCount + auctionCount
 end
 
 function FLIPR:AnalyzeFlipOpportunity(results, itemID)
-    -- Debug prints
-    if not self.itemDB then
-        print("Error: itemDB is nil!")
-        return nil
-    end
-    
-    -- Get item data from our database
+    -- Initial checks...
     local itemData = self.itemDB[itemID]
-    if not itemData then 
-        print("Warning: No data found for item", itemID)
-        return nil 
-    end
+    if not itemData then return nil end
     
-    -- Get current inventory and max allowed based on sale rate
-    local currentInventory = self:GetCurrentInventory(itemID)
+    -- Get inventory limits first
     local maxInventory = self:GetMaxInventoryForSaleRate(itemData.saleRate)
-    
-    -- If we're already at or above max inventory, skip this item
-    if currentInventory >= maxInventory then
-        return nil
-    end
-    
-    local bestProfit = 0
-    local bestSplit = nil
-    
-    -- Calculate how many more we can buy
+    local currentInventory = self:GetCurrentInventory(itemID)
     local roomForMore = maxInventory - currentInventory
     
-    -- Try different split points
-    for split = 1, #results-1 do
-        -- Calculate average buy price for items up to split
-        local totalBuyCost = 0
-        local totalBuyQuantity = 0
+    if roomForMore <= 0 then
+        print(string.format(
+            "|cFFFF0000Skipping %s - Already have %d/%d (Sale Rate: %.1f%%)|r",
+            GetItemInfo(itemID) or itemID,
+            currentInventory,
+            maxInventory,
+            itemData.saleRate * 100
+        ))
+        return nil
+    end
+    
+    -- Check if the minimum purchase quantity is too high
+    if results[1].totalQuantity > roomForMore then
+        print(string.format(
+            "|cFFFF0000Skipping %s - First auction quantity (%d) exceeds our limit (%d)|r",
+            GetItemInfo(itemID) or itemID,
+            results[1].totalQuantity,
+            roomForMore
+        ))
+        return nil
+    end
+    
+    -- Find profitable auctions
+    local profitableAuctions = {}
+    local currentPrice = results[1].minPrice
+    local deposit = 0  -- TODO: Calculate actual deposit
+    local ahCut = 0.05  -- 5% AH fee
+    
+    for i = 1, #results-1 do
+        local buyPrice = results[i].minPrice
+        local nextPrice = results[i+1].minPrice
+        local potentialProfit = (nextPrice * (1 - ahCut)) - (buyPrice + deposit)
         
-        for i = 1, split do
-            totalBuyCost = totalBuyCost + (results[i].minPrice * results[i].totalQuantity)
-            totalBuyQuantity = totalBuyQuantity + results[i].totalQuantity
+        if potentialProfit > 0 then
+            table.insert(profitableAuctions, {
+                index = i,
+                buyPrice = buyPrice,
+                sellPrice = nextPrice,
+                quantity = results[i].totalQuantity,
+                profit = potentialProfit
+            })
+        else
+            -- Stop looking once we find unprofitable price points
+            break
         end
-        
-        -- Skip if we'd be buying more than we have room for
-        if totalBuyQuantity > roomForMore then
-            -- If possible, adjust quantity to just buy what we have room for
-            if split == 1 then
-                totalBuyQuantity = roomForMore
-                totalBuyCost = (totalBuyCost / results[1].totalQuantity) * roomForMore
-            else
-                break
+    end
+    
+    if #profitableAuctions == 0 then
+        return nil
+    end
+    
+    -- Take the first profitable auction group
+    local bestDeal = profitableAuctions[1]
+    local buyQuantity = math.min(roomForMore, bestDeal.quantity)
+    
+    -- Debug output
+    print(string.format(
+        "Analysis for %s:\n" ..
+        "- Buy price: %s\n" ..
+        "- Sell price: %s\n" ..
+        "- Profit per item: %s\n" ..
+        "- Can buy: %d/%d",
+        GetItemInfo(itemID) or itemID,
+        GetCoinTextureString(bestDeal.buyPrice),
+        GetCoinTextureString(bestDeal.sellPrice),
+        GetCoinTextureString(bestDeal.profit),
+        buyQuantity,
+        bestDeal.quantity
+    ))
+    
+    return {
+        numAuctions = 1,  -- We're only buying from one price point at a time
+        buyQuantity = buyQuantity,
+        avgBuyPrice = bestDeal.buyPrice,
+        sellPrice = bestDeal.sellPrice,
+        totalProfit = bestDeal.profit * buyQuantity,
+        profitPerItem = bestDeal.profit,
+        roi = (bestDeal.profit / bestDeal.buyPrice) * 100,
+        currentInventory = currentInventory,
+        maxInventory = maxInventory,
+        saleRate = itemData.saleRate,
+        totalAvailable = bestDeal.quantity
+    }
+end
+
+function FLIPR:RemoveItemRow(itemID)
+    if not self.scrollChild then return end
+    
+    -- Find and remove the row for this item
+    for _, child in pairs({self.scrollChild:GetChildren()}) do
+        if child.itemData and child.itemData.itemID == itemID then
+            child:Hide()
+            child:SetParent(nil)
+            
+            -- Decrease profitable items count
+            self.profitableItemCount = (self.profitableItemCount or 1) - 1
+            
+            -- Reposition remaining rows
+            local yOffset = 0
+            for _, remainingChild in pairs({self.scrollChild:GetChildren()}) do
+                if remainingChild:IsShown() then
+                    remainingChild:SetPoint("TOPLEFT", self.scrollChild, "TOPLEFT", 0, -yOffset)
+                    yOffset = yOffset + ROW_HEIGHT
+                end
             end
-        end
-        
-        local avgBuyPrice = totalBuyCost / totalBuyQuantity
-        
-        -- Calculate potential sell price (minimum price after our split)
-        local sellPrice = results[split + 1].minPrice * 0.95 -- Account for AH cut
-        
-        -- Calculate potential profit
-        local profitPerItem = sellPrice - avgBuyPrice
-        local totalProfit = profitPerItem * totalBuyQuantity
-        
-        -- If this split is more profitable, store it
-        if totalProfit > bestProfit then
-            bestProfit = totalProfit
-            bestSplit = {
-                numAuctions = split,
-                buyQuantity = totalBuyQuantity,
-                avgBuyPrice = avgBuyPrice,
-                sellPrice = sellPrice,
-                totalProfit = totalProfit,
-                profitPerItem = profitPerItem,
-                roi = (profitPerItem / avgBuyPrice) * 100,
-                currentInventory = currentInventory,
-                maxInventory = maxInventory,
-                saleRate = itemData.saleRate
-            }
+            
+            -- Update scroll child height
+            self.scrollChild:SetHeight(math.max(1, self.profitableItemCount * ROW_HEIGHT))
+            break
         end
     end
+end
+
+function FLIPR:BuyItem(itemData)
+    -- ... existing purchase code ...
     
-    -- Only return opportunities with meaningful profit and ROI
-    if bestSplit and bestSplit.roi >= 20 then -- Minimum 20% ROI
-        return bestSplit
+    -- After successful purchase:
+    self:RemoveItemRow(itemData.itemID)
+    
+    -- Rescan this item
+    local itemKey = C_AuctionHouse.MakeItemKey(itemData.itemID)
+    if itemData.isCommodity then
+        C_AuctionHouse.SendSearchQuery(nil, {}, true, itemData.itemID)
+    else
+        C_AuctionHouse.SendSearchQuery(itemKey, {}, true)
     end
+end
+
+function FLIPR:RescanSingleItem(itemID)
+    if not itemID then
+        print("Error: No itemID provided to RescanSingleItem")
+        return
+    end
+
+    -- Clear any existing data for this item
+    self:RemoveItemRow(itemID)
     
-    return nil
-end 
+    -- Get item class to determine if it's a commodity
+    local _, _, _, _, _, itemClass = GetItemInfo(itemID)
+    local isCommodity = (
+        itemClass == Enum.ItemClass.Consumable or
+        itemClass == Enum.ItemClass.Reagent or
+        itemClass == Enum.ItemClass.TradeGoods or
+        itemClass == Enum.ItemClass.Recipe
+    )
+    
+    -- Debug output
+    print("Rescanning item:", itemID, "IsCommodity:", isCommodity)
+    
+    -- Send appropriate search query
+    if isCommodity then
+        C_AuctionHouse.SendSearchQuery(nil, {}, true, itemID)
+    else
+        local itemKey = C_AuctionHouse.MakeItemKey(itemID)
+        if itemKey then
+            C_AuctionHouse.SendSearchQuery(itemKey, {}, true)
+        else
+            print("Error: Failed to create item key for", itemID)
+        end
+    end
+end
+  

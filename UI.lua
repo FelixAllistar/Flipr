@@ -5,10 +5,6 @@ local ROW_HEIGHT = 25
 FLIPR.scanTimer = 0
 FLIPR.scanStartTime = 0
 
-function FLIPR:OnEnable()
-    self:RegisterEvent("AUCTION_HOUSE_SHOW", "OnAuctionHouseShow")
-end
-
 function FLIPR:OnAuctionHouseShow()
     if not self.tabCreated then
         self:CreateFLIPRTab()
@@ -23,11 +19,14 @@ function FLIPR:CreateFLIPRTab()
     fliprTab:SetText("FLIPR")
     fliprTab:SetPoint("LEFT", AuctionHouseFrame.Tabs[numTabs-1], "RIGHT", -15, 0)
 
-    local contentFrame = CreateFrame("Frame", nil, AuctionHouseFrame)
+    local contentFrame = CreateFrame("Frame", "FLIPRContentFrame", AuctionHouseFrame)
     contentFrame:SetPoint("TOPLEFT", AuctionHouseFrame, "TOPLEFT", 0, -60)
     contentFrame:SetPoint("BOTTOMRIGHT", AuctionHouseFrame, "BOTTOMRIGHT", 0, 0)
     contentFrame:Hide()
-
+    
+    -- Store reference to content frame
+    self.contentFrame = contentFrame
+    
     -- Our tab's click handler
     fliprTab:SetScript("OnClick", function()
         -- Hide all default frames
@@ -42,6 +41,14 @@ function FLIPR:CreateFLIPRTab()
         
         PanelTemplates_SetTab(AuctionHouseFrame, numTabs)
         contentFrame:Show()
+        
+        -- Debug print
+        print("FLIPR tab clicked - Content frame shown")
+        if self.scrollChild then
+            print("ScrollChild exists with height:", self.scrollChild:GetHeight())
+        else
+            print("ScrollChild is nil!")
+        end
     end)
 
     -- Hook the AuctionHouseFrame display mode
@@ -61,6 +68,7 @@ function FLIPR:CreateFLIPRTab()
     self.fliprTab = fliprTab
     self.contentFrame = contentFrame
 
+    -- Create UI sections in the correct order
     self:CreateTitleSection(contentFrame)
     self:CreateOptionsSection(contentFrame)
     self:CreateResultsSection(contentFrame)
@@ -220,18 +228,34 @@ function FLIPR:CreateTitleSection(contentFrame)
     
     -- Add click handler
     buyButton:SetScript("OnClick", function()
-        if not self.buyConfirmFrame then
-            self.buyConfirmFrame = self:CreateBuyConfirmationFrame()
-        end
-        
         if not self.selectedItem then
             print("No items selected!")
             return
         end
         
+        if not self.selectedItem.itemID then
+            print("Selected item has no itemID!")
+            return
+        end
+        
+        -- Debug output
+        print("Attempting to buy item:", self.selectedItem.itemID)
+        
+        -- Rescan the item before showing buy confirmation
+        self:RescanSingleItem(self.selectedItem.itemID)
+        
+        if not self.buyConfirmFrame then
+            self.buyConfirmFrame = self:CreateBuyConfirmationFrame()
+        end
+        
         local itemName = GetItemInfo(self.selectedItem.itemID)
-        local totalQty = self.selectedItem.totalQuantity
-        local totalPrice = self.selectedItem.minPrice * totalQty
+        if not itemName then
+            print("Error: Could not get item info")
+            return
+        end
+        
+        local totalQty = self.selectedItem.totalQuantity or 0
+        local totalPrice = (self.selectedItem.minPrice or 0) * totalQty
         
         self.buyConfirmFrame.itemText:SetText("Item: " .. itemName)
         self.buyConfirmFrame.qtyText:SetText(string.format("Quantity: %d", totalQty))
@@ -307,25 +331,67 @@ function FLIPR:CreateOptionsSection(contentFrame)
 end
 
 function FLIPR:CreateResultsSection(contentFrame)
-    local resultsSection = CreateFrame("Frame", nil, contentFrame)
+    -- Remove old results section if it exists
+    if self.resultsSection then
+        self.resultsSection:Hide()
+        self.resultsSection = nil
+    end
+
+    -- Create new results section
+    local resultsSection = CreateFrame("Frame", "FLIPRResultsSection", contentFrame)
     resultsSection:SetPoint("TOPLEFT", self.divider, "BOTTOMLEFT", 0, -20)
     resultsSection:SetPoint("BOTTOMRIGHT", contentFrame, "BOTTOMRIGHT", 0, 0)
     
+    -- Add background
     local resultsBg = resultsSection:CreateTexture(nil, "BACKGROUND")
     resultsBg:SetAllPoints()
     resultsBg:SetColorTexture(0.05, 0.05, 0.05, 0.9)
 
-    local scrollFrame = CreateFrame("ScrollFrame", nil, resultsSection, "UIPanelScrollFrameTemplate")
+    -- Create scroll frame
+    local scrollFrame = CreateFrame("ScrollFrame", "FLIPRScrollFrame", resultsSection, "UIPanelScrollFrameTemplate")
     scrollFrame:SetPoint("TOPLEFT", resultsSection, "TOPLEFT", 10, -10)
     scrollFrame:SetPoint("BOTTOMRIGHT", resultsSection, "BOTTOMRIGHT", -30, 10)
 
-    local scrollChild = CreateFrame("Frame", nil, scrollFrame)
-    scrollFrame:SetScrollChild(scrollChild)
+    -- Create scroll child
+    local scrollChild = CreateFrame("Frame", "FLIPRScrollChild", scrollFrame)
     scrollChild:SetWidth(scrollFrame:GetWidth())
     scrollChild:SetHeight(1)
+    
+    -- Set scroll child
+    scrollFrame:SetScrollChild(scrollChild)
 
+    -- Store references globally in FLIPR
     self.resultsSection = resultsSection
     self.scrollFrame = scrollFrame
     self.scrollChild = scrollChild
+
+    -- Debug prints
+    print("Results section created")
+    print("ScrollChild width:", scrollChild:GetWidth())
+    print("ScrollChild parent:", scrollChild:GetParent():GetName())
+    print("ScrollFrame parent:", scrollFrame:GetParent():GetName())
+
+    -- Make everything visible
+    resultsSection:Show()
+    scrollFrame:Show()
+    scrollChild:Show()
+
+    -- Add test row to verify UI is working
+    local testRow = CreateFrame("Frame", nil, scrollChild)
+    testRow:SetSize(scrollChild:GetWidth(), ROW_HEIGHT)
+    testRow:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 0, 0)
+    
+    local testBg = testRow:CreateTexture(nil, "BACKGROUND")
+    testBg:SetAllPoints()
+    testBg:SetColorTexture(0.1, 0.1, 0.1, 0.5)
+    
+    local testText = testRow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    testText:SetPoint("LEFT", testRow, "LEFT", 5, 0)
+    testText:SetText("Test Row - If you can see this, UI is working")
+    
+    scrollChild:SetHeight(ROW_HEIGHT)
+    
+    -- Store the test row so we can remove it later
+    self.testRow = testRow
 end
  
