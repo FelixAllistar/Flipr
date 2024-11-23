@@ -25,6 +25,20 @@ local defaultSettings = {
     }
 }
 
+function FLIPR:InitializeDB()
+    self.itemDB = {}
+    -- Merge all our database files into one
+    if FLIPR_ItemDatabase_1VeryHigh10000plus then
+        print("Loading Very High database...")
+        for k, v in pairs(FLIPR_ItemDatabase_1VeryHigh10000plus) do
+            self.itemDB[k] = v
+        end
+        print("Database loaded with", #self.itemDB, "items")
+    else
+        print("Warning: Very High database not found!")
+    end
+end
+
 function FLIPR:OnInitialize()
     -- Create settings if they don't exist
     if not FLIPRSettings then
@@ -39,8 +53,31 @@ function FLIPR:OnInitialize()
     end
     
     self.db = FLIPRSettings
-    print("FLIPR Settings loaded. ShowConfirm:", self.db.showConfirm)
+    
+    -- Initialize database immediately
+    self:InitializeDB()
+    
+    print("FLIPR Settings and Database loaded")
 end
 
--- Initialize the addon
-FLIPR:OnInitialize() 
+function FLIPR:OnEnable()
+    -- Initialize UI events
+    self:RegisterEvent("AUCTION_HOUSE_SHOW", "OnAuctionHouseShow")
+    
+    -- Initialize scanner
+    self.selectedRow = nil
+    self.selectedItem = nil
+    self.isScanning = false
+    self.isPaused = false
+    self.scanButton = nil
+    self.failedItems = {}
+    self.maxRetries = 3
+    self.retryDelay = 2
+    
+    -- Initialize scan timer
+    self.scanTimer = 0
+    self.scanStartTime = 0
+    
+    -- Debug print
+    print("FLIPR enabled - All systems initialized")
+end 
