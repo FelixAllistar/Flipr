@@ -11,6 +11,16 @@ FLIPR.failedItems = {}
 FLIPR.maxRetries = 3
 FLIPR.retryDelay = 2 -- seconds
 
+function FLIPR:FormatGoldAndSilver(goldValue)
+    local gold = math.floor(goldValue)
+    local silver = math.floor((goldValue - gold) * 100)
+    if silver > 0 then
+        return string.format("%dg%ds", gold, silver)
+    else
+        return string.format("%dg", gold)
+    end
+end
+
 function FLIPR:ScanItems()
     -- If paused, resume scanning
     if self.isPaused then
@@ -134,7 +144,7 @@ function FLIPR:ScanNextItem()
         end
 
         local itemID = self.itemIDs[self.currentScanIndex]
-        print("Scanning item:", itemID)
+        print(string.format("Scanning item %d/%d: %s", self.currentScanIndex, #self.itemIDs, itemID))
 
         -- Wait for item info to be available
         local itemName, _, _, _, _, itemClass = GetItemInfo(itemID)
@@ -285,8 +295,11 @@ end
 function FLIPR:ProcessAuctionResults(results)
     local itemID = self.itemIDs[self.currentScanIndex - 1]
     local itemName = GetItemInfo(itemID)
+    local itemData = self.itemDB[itemID]
     
-    if not itemName then return end
+    print(string.format("Processing results for item %d/%d: %s", self.currentScanIndex, #self.itemIDs, itemID))
+    
+    if not itemName or not itemData then return end
 
     -- Analyze flip opportunity first
     local flipOpportunity = nil
@@ -296,6 +309,23 @@ function FLIPR:ProcessAuctionResults(results)
 
     -- Only proceed if profitable
     if flipOpportunity then
+        -- Play sound
+        PlaySoundFile("Interface\\AddOns\\FLIPR\\sounds\\VO_GoblinVenM_Greeting06.ogg", "Master")
+        
+        -- Debug print in green
+        print(string.format(
+            "|cFF00FF00[Item %d/%d] Found flip for %s: Buy @ %s (x%d), Sell @ %s, Profit: %s, ROI: %d%%, Sale Rate: %.1f%%|r",
+            self.currentScanIndex,  -- Current item number
+            #self.itemIDs,         -- Total items
+            itemName,
+            GetCoinTextureString(flipOpportunity.avgBuyPrice),
+            flipOpportunity.buyQuantity,
+            GetCoinTextureString(flipOpportunity.sellPrice),
+            GetCoinTextureString(flipOpportunity.totalProfit),
+            flipOpportunity.roi,
+            itemData.saleRate * 100
+        ))
+        
         -- Create or get profitable items counter
         if not self.profitableItemCount then
             self.profitableItemCount = 0
@@ -338,16 +368,24 @@ function FLIPR:ProcessAuctionResults(results)
         priceText:SetPoint("LEFT", nameText, "RIGHT", 10, 0)
         priceText:SetText(GetCoinTextureString(flipOpportunity.avgBuyPrice))
         
-        -- Profit text (right-aligned)
+        -- Sale Rate text (changed to raw decimal)
+        local saleRateText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        saleRateText:SetPoint("LEFT", priceText, "RIGHT", 10, 0)
+        saleRateText:SetText(string.format("Sale Rate: %.3f", itemData.saleRate))
+        
+        -- Profit text with ROI
         local profitText = row:CreateFontString(nil, "OVERLAY", "GameFontGreen")
-        profitText:SetPoint("LEFT", priceText, "RIGHT", 10, 0)
+        profitText:SetPoint("LEFT", saleRateText, "RIGHT", 10, 0)
         profitText:SetText(string.format(
-            "Profit: %s (%d%% ROI) - Stock: %d/%d",
+            "Profit: %s (%d%% ROI)",
             GetCoinTextureString(flipOpportunity.totalProfit),
-            flipOpportunity.roi,
-            flipOpportunity.currentInventory,
-            flipOpportunity.maxInventory
+            flipOpportunity.roi
         ))
+        
+        -- Market Value text 
+        local marketValueText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        marketValueText:SetPoint("LEFT", profitText, "RIGHT", 10, 0)
+        marketValueText:SetText(string.format("MV: %s", self:FormatGoldAndSilver(itemData.marketValue)))
 
         -- Store all auction data with the row
         row.itemData = {

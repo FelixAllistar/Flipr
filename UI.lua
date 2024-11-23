@@ -5,6 +5,60 @@ local ROW_HEIGHT = 25
 FLIPR.scanTimer = 0
 FLIPR.scanStartTime = 0
 
+function FLIPR:CancelScan()
+    -- Stop scanning
+    self.isScanning = false
+    self.isPaused = false
+    
+    -- Reset scan progress
+    if self.scanProgressText then
+        self.scanProgressText:SetText("")
+    end
+    
+    -- Reset timer
+    self.scanTimer = 0
+    self.scanStartTime = 0
+    if self.scanTimerText then
+        self.scanTimerText:SetText("")
+    end
+    if self.timerFrame then
+        self.timerFrame:Hide()
+    end
+    
+    -- Reset scan button text
+    if self.scanButton then
+        self.scanButton:SetText("Scan Items")
+        self.scanButton.buttonText:SetText("Scan Items")
+    end
+    
+    -- Clear all rows
+    if self.scrollChild then
+        for _, child in pairs({self.scrollChild:GetChildren()}) do
+            child:Hide()
+            child:SetParent(nil)
+        end
+        self.scrollChild:SetHeight(1)
+    end
+    
+    -- Reset row counter
+    self.profitableItemCount = 0
+    
+    -- Reset scanner variables
+    self.currentScanIndex = 1
+    self.selectedRow = nil
+    self.selectedItem = nil
+    self.failedItems = {}
+    
+    -- Unregister events if they're registered
+    if self.isEventRegistered then
+        self:UnregisterEvent("COMMODITY_SEARCH_RESULTS_UPDATED")
+        self:UnregisterEvent("ITEM_SEARCH_RESULTS_UPDATED")
+        self.isEventRegistered = false
+    end
+    
+    print("|cFFFF9999Scan cancelled - All data cleared|r")
+end
+
 function FLIPR:OnAuctionHouseShow()
     if not self.tabCreated then
         self:CreateFLIPRTab()
@@ -85,35 +139,70 @@ function FLIPR:CreateTitleSection(contentFrame)
     titleBg:SetAllPoints()
     titleBg:SetColorTexture(0.1, 0.1, 0.1, 0.8)
 
-    -- Create scan button
-    local scanButton = CreateFrame("Button", nil, titleSection)
-    scanButton:SetSize(120, 25)
-    scanButton:SetPoint("LEFT", titleSection, "LEFT", 20, 0)
+    -- Create cancel button FIRST
+    local cancelButton = CreateFrame("Button", nil, titleSection)
+    cancelButton:SetSize(25, 25)
+    cancelButton:SetPoint("LEFT", titleSection, "LEFT", 10, 0)  -- Moved more to the left
+    cancelButton:SetFrameLevel(titleSection:GetFrameLevel() + 1)  -- Make sure it's above other elements
     
     -- Add button textures
-    local normalTexture = scanButton:CreateTexture(nil, "BACKGROUND")
-    normalTexture:SetAllPoints()
-    normalTexture:SetColorTexture(0.2, 0.2, 0.2, 0.9)
-
-    local highlightTexture = scanButton:CreateTexture(nil, "HIGHLIGHT")
-    highlightTexture:SetAllPoints()
-    highlightTexture:SetColorTexture(0.3, 0.3, 0.3, 0.9)
-
-    local pushedTexture = scanButton:CreateTexture(nil, "BACKGROUND")
-    pushedTexture:SetAllPoints()
-    pushedTexture:SetColorTexture(0.15, 0.15, 0.15, 0.9)
-
+    local cancelNormalTexture = cancelButton:CreateTexture(nil, "BACKGROUND")
+    cancelNormalTexture:SetAllPoints()
+    cancelNormalTexture:SetColorTexture(0.3, 0.1, 0.1, 0.9)  -- Dark red
+    
+    local cancelHighlightTexture = cancelButton:CreateTexture(nil, "HIGHLIGHT")
+    cancelHighlightTexture:SetAllPoints()
+    cancelHighlightTexture:SetColorTexture(0.4, 0.1, 0.1, 0.9)  -- Lighter red
+    
+    local cancelPushedTexture = cancelButton:CreateTexture(nil, "BACKGROUND")
+    cancelPushedTexture:SetAllPoints()
+    cancelPushedTexture:SetColorTexture(0.2, 0.05, 0.05, 0.9)  -- Darker red
+    
     -- Add button border
-    local border = scanButton:CreateTexture(nil, "BORDER")
-    border:SetAllPoints()
-    border:SetColorTexture(0.5, 0.4, 0, 0.5)
+    local cancelBorder = cancelButton:CreateTexture(nil, "BORDER")
+    cancelBorder:SetAllPoints()
+    cancelBorder:SetColorTexture(0.5, 0.1, 0.1, 0.5)
+    
+    -- Create X text
+    local cancelText = cancelButton:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    cancelText:SetPoint("CENTER", cancelButton, "CENTER", 0, 0)
+    cancelText:SetText("X")
+    cancelText:SetTextColor(1, 0.3, 0.3, 1)
     
     -- Set button textures
-    scanButton:SetNormalTexture(normalTexture)
-    scanButton:SetHighlightTexture(highlightTexture)
-    scanButton:SetPushedTexture(pushedTexture)
+    cancelButton:SetNormalTexture(cancelNormalTexture)
+    cancelButton:SetHighlightTexture(cancelHighlightTexture)
+    cancelButton:SetPushedTexture(cancelPushedTexture)
     
-    -- Store reference to button
+    -- Add click handler
+    cancelButton:SetScript("OnClick", function()
+        self:CancelScan()
+    end)
+
+    -- Create scan button AFTER cancel button
+    local scanButton = CreateFrame("Button", nil, titleSection)
+    scanButton:SetSize(120, 25)
+    scanButton:SetPoint("LEFT", cancelButton, "RIGHT", 10, 0)  -- Position relative to cancel button
+    
+    -- Fix scan button textures to match buy button (grey)
+    local scanNormalTexture = scanButton:CreateTexture(nil, "BACKGROUND")
+    scanNormalTexture:SetAllPoints()
+    scanNormalTexture:SetColorTexture(0.2, 0.2, 0.2, 0.9)
+
+    local scanHighlightTexture = scanButton:CreateTexture(nil, "HIGHLIGHT")
+    scanHighlightTexture:SetAllPoints()
+    scanHighlightTexture:SetColorTexture(0.3, 0.3, 0.3, 0.9)
+
+    local scanPushedTexture = scanButton:CreateTexture(nil, "BACKGROUND")
+    scanPushedTexture:SetAllPoints()
+    scanPushedTexture:SetColorTexture(0.15, 0.15, 0.15, 0.9)
+
+    -- Add scan button border
+    local scanBorder = scanButton:CreateTexture(nil, "BORDER")
+    scanBorder:SetAllPoints()
+    scanBorder:SetColorTexture(0.5, 0.4, 0, 0.5)
+
+    -- Store reference to scan button
     self.scanButton = scanButton
 
     -- Create button text
@@ -123,8 +212,15 @@ function FLIPR:CreateTitleSection(contentFrame)
     buttonText:SetTextColor(1, 0.82, 0, 1)
     scanButton.buttonText = buttonText  -- Store reference to text
     
-    -- Add click handler
-    scanButton:SetScript("OnClick", function() self:ScanItems() end)
+    -- Fix scan button click handler
+    scanButton:SetScript("OnClick", function() 
+        self:ScanItems()  -- Let ScanItems handle the state changes
+    end)
+    
+    -- Set button textures
+    scanButton:SetNormalTexture(scanNormalTexture)
+    scanButton:SetHighlightTexture(scanHighlightTexture)
+    scanButton:SetPushedTexture(scanPushedTexture)
     
     -- Add mouseover effect for the text
     scanButton:SetScript("OnEnter", function()
@@ -162,24 +258,6 @@ function FLIPR:CreateTitleSection(contentFrame)
     end)
     self.timerFrame = timerFrame
 
-    -- Modify scan button click handler to handle timer
-    scanButton:SetScript("OnClick", function() 
-        if not FLIPR.isScanning then
-            -- Starting new scan
-            FLIPR.scanStartTime = GetTime()
-            FLIPR.scanTimer = 0
-            timerFrame:Show()
-        elseif FLIPR.isPaused then
-            -- Resuming scan
-            FLIPR.scanStartTime = GetTime() - FLIPR.scanTimer
-            timerFrame:Show()
-        else
-            -- Pausing scan
-            timerFrame:Hide()
-        end
-        FLIPR:ScanItems() 
-    end)
-
     -- Create title text
     local titleText = titleSection:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     titleText:SetPoint("CENTER", titleSection, "CENTER", 0, 0)
@@ -196,36 +274,36 @@ function FLIPR:CreateTitleSection(contentFrame)
     local buyButton = CreateFrame("Button", nil, titleSection)
     buyButton:SetSize(80, 25)
     buyButton:SetPoint("RIGHT", versionText, "LEFT", -10, 0)
-    
+
     -- Add button textures
     local buyNormalTexture = buyButton:CreateTexture(nil, "BACKGROUND")
     buyNormalTexture:SetAllPoints()
-    buyNormalTexture:SetColorTexture(0.2, 0.2, 0.2, 0.9)
-    
+    buyNormalTexture:SetColorTexture(0.2, 0.2, 0.2, 0.9)  -- Back to grey
+
     local buyHighlightTexture = buyButton:CreateTexture(nil, "HIGHLIGHT")
     buyHighlightTexture:SetAllPoints()
     buyHighlightTexture:SetColorTexture(0.3, 0.3, 0.3, 0.9)
-    
+
     local buyPushedTexture = buyButton:CreateTexture(nil, "BACKGROUND")
     buyPushedTexture:SetAllPoints()
     buyPushedTexture:SetColorTexture(0.15, 0.15, 0.15, 0.9)
-    
+
     -- Add button border
     local buyBorder = buyButton:CreateTexture(nil, "BORDER")
     buyBorder:SetAllPoints()
     buyBorder:SetColorTexture(0.5, 0.4, 0, 0.5)
-    
+
     -- Create button text
     local buyButtonText = buyButton:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     buyButtonText:SetPoint("CENTER", buyButton, "CENTER", 0, 0)
     buyButtonText:SetText("Buy")
     buyButtonText:SetTextColor(1, 0.82, 0, 1)
-    
+
     -- Set button textures
     buyButton:SetNormalTexture(buyNormalTexture)
     buyButton:SetHighlightTexture(buyHighlightTexture)
     buyButton:SetPushedTexture(buyPushedTexture)
-    
+
     -- Add click handler
     buyButton:SetScript("OnClick", function()
         if not self.selectedItem then

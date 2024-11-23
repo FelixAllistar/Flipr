@@ -27,16 +27,31 @@ local defaultSettings = {
 
 function FLIPR:InitializeDB()
     self.itemDB = {}
-    -- Merge all our database files into one
-    if FLIPR_ItemDatabase_1VeryHigh10000plus then
-        print("Loading Very High database...")
-        for k, v in pairs(FLIPR_ItemDatabase_1VeryHigh10000plus) do
-            self.itemDB[k] = v
+    
+    -- Load all database files
+    local databases = {
+        ["Very High"] = FLIPR_ItemDatabase_1VeryHigh10000plus,
+        ["High"] = FLIPR_ItemDatabase_2High1000plus,
+        ["Medium"] = FLIPR_ItemDatabase_3Medium100plus,
+        ["Low"] = FLIPR_ItemDatabase_4Low10plus,
+        ["Very Low"] = FLIPR_ItemDatabase_5VeryLow1plus
+    }
+    
+    local totalItems = 0
+    for dbName, db in pairs(databases) do
+        if db then
+            print("Loading " .. dbName .. " database...")
+            for k, v in pairs(db) do
+                self.itemDB[k] = v
+                totalItems = totalItems + 1
+            end
+            print(dbName .. " database loaded")
+        else
+            print("Warning: " .. dbName .. " database not found!")
         end
-        print("Database loaded with", #self.itemDB, "items")
-    else
-        print("Warning: Very High database not found!")
     end
+    
+    print("Total items loaded into database:", totalItems)
 end
 
 function FLIPR:OnInitialize()
