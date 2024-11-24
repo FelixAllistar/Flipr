@@ -84,6 +84,9 @@ function FLIPR:ScanItems()
         self.isEventRegistered = true
     end
 
+    -- Reset processed items tracking at start of new scan
+    self.processedItems = {}
+
     -- Start scanning first item
     self:ScanNextItem()
 end
@@ -297,9 +300,24 @@ function FLIPR:ProcessAuctionResults(results)
     local itemName = GetItemInfo(itemID)
     local itemData = self.itemDB[itemID]
     
+    -- Add a guard to prevent duplicate processing
+    if not self.isScanning then return end
+    if not itemID or not itemName or not itemData then return end
+    
+    -- Add a processed items tracking if it doesn't exist
+    if not self.processedItems then
+        self.processedItems = {}
+    end
+    
+    -- Skip if we've already processed this item in this scan
+    if self.processedItems[itemID] then
+        return
+    end
+    
     print(string.format("Processing results for item %d/%d: %s", self.currentScanIndex, #self.itemIDs, itemID))
     
-    if not itemName or not itemData then return end
+    -- Mark this item as processed
+    self.processedItems[itemID] = true
 
     -- Analyze flip opportunity first
     local flipOpportunity = nil
@@ -505,12 +523,6 @@ function FLIPR:ProcessAuctionResults(results)
     -- Update progress text
     if self.scanProgressText then
         self.scanProgressText:SetText(string.format("%d/%d items", self.currentScanIndex, #self.itemIDs))
-    end
-
-    -- Queue next scan
-    self.currentScanIndex = self.currentScanIndex + 1
-    if self.currentScanIndex <= #self.itemIDs then
-        C_Timer.After(0.5, function() self:ScanNextItem() end)
     end
 end
 
