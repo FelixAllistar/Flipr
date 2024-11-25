@@ -16,41 +16,51 @@ local defaultItems = {
 local defaultSettings = {
     items = defaultItems,
     showConfirm = true,
-    enabledGroups = {
-        ["1.Very High 10000+"] = false,
-        ["2.High 1000+"] = false,
-        ["3.Medium 100+"] = false,
-        ["4.Low 10+"] = false,
-        ["5.Very Low 1+"] = true
-    }
+    enabledGroups = {},  -- Will be populated dynamically
+    expandedGroups = {}  -- Track which groups are expanded in the UI
 }
 
+function FLIPR:GetAvailableGroups()
+    local groups = {}
+    print("Scanning for available groups...")
+    -- Look for FLIPR_ tables in _G
+    for name, value in pairs(_G) do
+        if type(value) == "table" and name:match("^FLIPR_") then
+            print("Found group table:", name)
+            -- Store reference to the table
+            groups[name] = value
+        end
+    end
+    print("Total group tables found:", #groups)
+    return groups
+end
+
 function FLIPR:InitializeDB()
+    print("Initializing database...")
     self.itemDB = {}
+    self.availableGroups = self:GetAvailableGroups()
     
-    -- Load all database files
-    local databases = {
-        ["Very High"] = FLIPR_ItemDatabase_1VeryHigh10000plus,
-        ["High"] = FLIPR_ItemDatabase_2High1000plus,
-        ["Medium"] = FLIPR_ItemDatabase_3Medium100plus,
-        ["Low"] = FLIPR_ItemDatabase_4Low10plus,
-        ["Very Low"] = FLIPR_ItemDatabase_5VeryLow1plus
-    }
-    
-    local totalItems = 0
-    for dbName, db in pairs(databases) do
-        if db then
-            print("Loading " .. dbName .. " database...")
-            for k, v in pairs(db) do
-                self.itemDB[k] = v
-                totalItems = totalItems + 1
+    -- Load items from enabled groups
+    print("Loading items from enabled groups...")
+    for tableName, groupData in pairs(self.availableGroups) do
+        print("Processing table:", tableName)
+        if groupData.items then
+            for groupPath, enabled in pairs(self.db.enabledGroups) do
+                if enabled then
+                    print("Loading enabled group:", groupPath)
+                    local items = groupData:GetItemsByGroup(groupPath)
+                    for itemId, itemData in pairs(items) do
+                        self.itemDB[itemId] = itemData
+                    end
+                end
             end
-            print(dbName .. " database loaded")
-        else
-            print("Warning: " .. dbName .. " database not found!")
         end
     end
     
+    local totalItems = 0
+    for _ in pairs(self.itemDB) do
+        totalItems = totalItems + 1
+    end
     print("Total items loaded into database:", totalItems)
 end
 
@@ -69,7 +79,7 @@ function FLIPR:OnInitialize()
     
     self.db = FLIPRSettings
     
-    -- Initialize database immediately
+    -- Initialize database
     self:InitializeDB()
     
     print("FLIPR Settings and Database loaded")

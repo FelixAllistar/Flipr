@@ -97,90 +97,59 @@ function FLIPR:ScanNextItem()
         return
     end
 
-    -- First handle any failed items that need retry
-    if self.failedItems and #self.failedItems > 0 then
-        local failedItem = self.failedItems[1]
-        if not failedItem or not failedItem.itemID then
-            tremove(self.failedItems, 1)
-            C_Timer.After(0.1, function() self:ScanNextItem() end)
-            return
-        end
-        
-        -- Wait for throttle
-        if not C_AuctionHouse.IsThrottledMessageSystemReady() then
-            C_Timer.After(0.5, function() self:ScanNextItem() end)
-            return
-        end
-
-        -- Check if we've exceeded max retries
-        if failedItem.retries >= self.maxRetries then
-            print("Skipping item after max retries:", failedItem.itemID)
-            tremove(self.failedItems, 1)
-            -- Update progress text
-            if self.scanProgressText then
-                self.scanProgressText:SetText(string.format("%d/%d items", self.currentScanIndex, #self.itemIDs))
-            end
-            C_Timer.After(0.1, function() self:ScanNextItem() end)
-            return
-        end
-
-        -- Only remove and process if we're ready to send query
-        tremove(self.failedItems, 1)
-        failedItem.retries = failedItem.retries + 1
-        
-        if failedItem.isCommodity then
-            pcall(function()
-                C_AuctionHouse.SendSearchQuery(nil, {}, true, failedItem.itemID)
-            end)
-        else
-            local itemKey = C_AuctionHouse.MakeItemKey(failedItem.itemID)
-            if itemKey then
-                pcall(function()
-                    C_AuctionHouse.SendSearchQuery(itemKey, {}, true)
-                end)
-            end
-        end
-        return
-    end
-
     -- Continue with normal scanning
     if self.currentScanIndex <= #self.itemIDs then
+        local itemID = self.itemIDs[self.currentScanIndex]
+        local itemData = self.itemDB[itemID]
+        
+        -- Check if we have data for this item
+        if not itemData then
+            print(string.format("|cFFFF0000Item %d not found in database, skipping|r", itemID))
+            self.currentScanIndex = self.currentScanIndex + 1
+            self:ScanNextItem()
+            return
+        end
+        
+        -- Always print scanning message first
+        print(string.format("|cFFFFFFFFScanning item %d/%d: %s (%d)|r", 
+            self.currentScanIndex, #self.itemIDs, itemData.name, itemID))
+
         -- Wait for throttle
         if not C_AuctionHouse.IsThrottledMessageSystemReady() then
+            print("Throttled, waiting...")
             C_Timer.After(0.5, function() self:ScanNextItem() end)
             return
         end
 
-        local itemID = self.itemIDs[self.currentScanIndex]
-        
-        -- Wait for item info to be available
-        local itemName, _, _, _, _, itemClass = GetItemInfo(itemID)
-        if not itemName then
-            local item = Item:CreateFromItemID(itemID)
-            item:ContinueOnItemLoad(function()
-                self:ScanNextItem()
-            end)
+        -- Update progress text
+        if self.scanProgressText then
+            self.scanProgressText:SetText(string.format("%d/%d items", 
+                self.currentScanIndex, #self.itemIDs))
+        end
+
+        -- Check if item is a commodity using AH API
+        local itemKey = C_AuctionHouse.MakeItemKey(itemID)
+        if not itemKey then
+            print(string.format("|cFFFF0000Failed to create item key for: %s (%d)|r", itemData.name, itemID))
+            self.currentScanIndex = self.currentScanIndex + 1
+            self:ScanNextItem()
             return
         end
 
-        -- Only print after we have item info
-        print(string.format("Scanning item %d/%d: %s", self.currentScanIndex, #self.itemIDs, itemID))
-
-        -- Check if item is likely a commodity
-        local isCommodity = (
-            itemClass == Enum.ItemClass.Consumable or
-            itemClass == Enum.ItemClass.Reagent or
-            itemClass == Enum.ItemClass.TradeGoods or
-            itemClass == Enum.ItemClass.Recipe
-        )
+        local itemInfo = C_AuctionHouse.GetItemKeyInfo(itemKey)
+        if not itemInfo then
+            print(string.format("|cFFFF0000Failed to get item info for: %s (%d)|r", itemData.name, itemID))
+            self.currentScanIndex = self.currentScanIndex + 1
+            self:ScanNextItem()
+            return
+        end
         
-        -- Increment scan index before sending query
-        self.currentScanIndex = self.currentScanIndex + 1
-        
-        if isCommodity then
+        -- Debug print commodity status
+        if itemInfo.isCommodity then
+            print(string.format("|cFF00FFFFItem is a commodity: %s|r", itemData.name))
             C_AuctionHouse.SendSearchQuery(nil, {}, true, itemID)
         else
-            local itemKey = C_AuctionHouse.MakeItemKey(itemID)
+            print(string.format("|cFFFF00FFItem is NOT a commodity: %s|r", itemData.name))
             C_AuctionHouse.SendSearchQuery(itemKey, {}, true)
         end
     else
@@ -209,41 +178,27 @@ function FLIPR:ScanNextItem()
 end
 
 function FLIPR:OnCommoditySearchResults()
-    local itemID = self.itemIDs[self.currentScanIndex - 1]
-    if not itemID then 
-        -- This might be a rescan of a specific item
-        itemID = self.selectedItem and self.selectedItem.itemID
-        if not itemID then return end
-    end
+    local itemID = self.itemIDs[self.currentScanIndex]
+    if not itemID then return end
     
     -- First check if we have any results at all
     local numResults = C_AuctionHouse.GetNumCommoditySearchResults(itemID)
     if not numResults or numResults == 0 then
-        -- Debug output in red
         print(string.format("|cFFFF0000No auctions found for item: %s|r", GetItemInfo(itemID) or itemID))
-        
-        -- Process empty results to update UI
-        self:ProcessAuctionResults({})
-        
-        C_Timer.After(0.1, function()
-            self:ScanNextItem()
-        end)
+        self.currentScanIndex = self.currentScanIndex + 1
+        self:ScanNextItem()
         return
     end
 
     -- Check if we have all results yet
     if not C_AuctionHouse.HasFullCommoditySearchResults(itemID) then
-        print("Requesting more results for item:", itemID)
         C_AuctionHouse.RequestMoreCommoditySearchResults(itemID)
         return  -- Wait for another COMMODITY_SEARCH_RESULTS_UPDATED event
     end
 
     local itemInfo = C_AuctionHouse.GetItemKeyInfo(C_AuctionHouse.MakeItemKey(itemID))
-    if not itemInfo or not itemInfo.isCommodity then
-        return
-    end
+    if not itemInfo then return end
     
-    print("Processing all results for item:", itemID)
     local processedResults = {}
     for i = 1, numResults do
         local result = C_AuctionHouse.GetCommoditySearchResultInfo(itemID, i)
@@ -252,36 +207,31 @@ function FLIPR:OnCommoditySearchResults()
                 itemName = GetItemInfo(itemID),
                 minPrice = result.unitPrice,
                 totalQuantity = result.quantity,
-                itemID = itemID
+                itemID = itemID,
+                isCommodity = true
             })
         end
     end
     
-    self:ProcessAuctionResults(processedResults)
+    if #processedResults > 0 then
+        self:ProcessAuctionResults(processedResults)
+    end
+    
+    self.currentScanIndex = self.currentScanIndex + 1
     self:ScanNextItem()
 end
 
 function FLIPR:OnItemSearchResults()
-    local itemID = self.itemIDs[self.currentScanIndex - 1]
-    if not itemID then 
-        -- This might be a rescan of a specific item
-        itemID = self.selectedItem and self.selectedItem.itemID
-        if not itemID then return end
-    end
+    local itemID = self.itemIDs[self.currentScanIndex]
+    if not itemID then return end
     
     local itemKey = C_AuctionHouse.MakeItemKey(itemID)
     local numResults = C_AuctionHouse.GetNumItemSearchResults(itemKey)
     
     if not numResults or numResults == 0 then
-        -- Debug output in red
         print(string.format("|cFFFF0000No auctions found for item: %s|r", GetItemInfo(itemID) or itemID))
-        
-        -- Process empty results to update UI
-        self:ProcessAuctionResults({})
-        
-        C_Timer.After(0.1, function()
-            self:ScanNextItem()
-        end)
+        self.currentScanIndex = self.currentScanIndex + 1
+        self:ScanNextItem()
         return
     end
 
@@ -294,59 +244,49 @@ function FLIPR:OnItemSearchResults()
                 minPrice = result.buyoutAmount or result.bidAmount,
                 totalQuantity = 1,
                 itemID = itemID,
-                auctionID = result.auctionID
+                auctionID = result.auctionID,
+                isCommodity = false
             })
         end
     end
-    self:ProcessAuctionResults(processedResults)
+    
+    if #processedResults > 0 then
+        self:ProcessAuctionResults(processedResults)
+    end
+    
+    self.currentScanIndex = self.currentScanIndex + 1
     self:ScanNextItem()
 end
 
 function FLIPR:ProcessAuctionResults(results)
-    local itemID = self.itemIDs[self.currentScanIndex - 1]
+    if not results or #results == 0 then return end
+    
+    local itemID = results[1].itemID
+    if not itemID then return end
+    
+    -- Wait for item info to be available
     local itemName = GetItemInfo(itemID)
-    local itemData = self.itemDB[itemID]
-    
-    -- Add a guard to prevent duplicate processing
-    if not self.isScanning then return end
-    if not itemID or not itemName or not itemData then return end
-    
-    -- Add a processed items tracking if it doesn't exist
-    if not self.processedItems then
-        self.processedItems = {}
-    end
-    
-    -- Skip if we've already processed this item in this scan
-    if self.processedItems[itemID] then
+    if not itemName then
+        local item = Item:CreateFromItemID(itemID)
+        item:ContinueOnItemLoad(function()
+            self:ProcessAuctionResults(results)
+        end)
         return
     end
     
-    print(string.format("Processing results for item %d/%d: %s", self.currentScanIndex, #self.itemIDs, itemID))
+    -- Debug print for database lookup
+    local itemData = self.itemDB[itemID]
+    if not itemData then 
+        print(string.format("|cFFFF0000No item data found in database for: %s (ID: %d)|r", itemName, itemID))
+        return 
+    end
     
-    -- Mark this item as processed
-    self.processedItems[itemID] = true
-
-    -- Analyze flip opportunity only if we have results
-    local flipOpportunity = nil
-    if results and #results > 1 then
-        flipOpportunity = self:AnalyzeFlipOpportunity(results, itemID)
-    end
-
-    -- Update progress text regardless of results
-    if self.scanProgressText then
-        self.scanProgressText:SetText(string.format("%d/%d items", self.currentScanIndex, #self.itemIDs))
-    end
-
-    -- Only proceed with UI updates if profitable
+    -- Analyze flip opportunity
+    local flipOpportunity = self:AnalyzeFlipOpportunity(results, itemID)
     if flipOpportunity then
-        -- Play sound
-        PlaySoundFile("Interface\\AddOns\\FLIPR\\sounds\\VO_GoblinVenM_Greeting06.ogg", "Master")
-        
-        -- Debug print in green
+        -- Debug print in green for profitable items
         print(string.format(
-            "|cFF00FF00[Item %d/%d] Found flip for %s: Buy @ %s (x%d), Sell @ %s, Profit: %s, ROI: %d%%, Sale Rate: %.1f%%|r",
-            self.currentScanIndex,  -- Current item number
-            #self.itemIDs,         -- Total items
+            "|cFF00FF00Found flip for %s: Buy @ %s (x%d), Sell @ %s, Profit: %s, ROI: %d%%, Sale Rate: %.1f%%|r",
             itemName,
             GetCoinTextureString(flipOpportunity.avgBuyPrice),
             flipOpportunity.buyQuantity,
@@ -356,180 +296,15 @@ function FLIPR:ProcessAuctionResults(results)
             itemData.saleRate * 100
         ))
         
-        -- Create or get profitable items counter
-        if not self.profitableItemCount then
-            self.profitableItemCount = 0
-        end
-        self.profitableItemCount = self.profitableItemCount + 1
-
-        -- Create row container
-        local rowContainer = CreateFrame("Frame", nil, self.scrollChild)
-        rowContainer:SetSize(self.scrollChild:GetWidth(), ROW_HEIGHT)
-        
-        -- Position based on profitable items count
-        rowContainer:SetPoint("TOPLEFT", self.scrollChild, "TOPLEFT", 0, -((self.profitableItemCount - 1) * ROW_HEIGHT))
-        self.scrollChild:SetHeight(self.profitableItemCount * ROW_HEIGHT)
-
-        -- Main row
-        local row = CreateFrame("Button", nil, rowContainer)
-        row:SetAllPoints(rowContainer)
-        
-        -- Default background
-        local defaultBg = row:CreateTexture(nil, "BACKGROUND")
-        defaultBg:SetAllPoints()
-        defaultBg:SetColorTexture(0.1, 0.1, 0.1, 0.5)
-        row.defaultBg = defaultBg
-
-        -- Selection background
-        local selection = row:CreateTexture(nil, "BACKGROUND")
-        selection:SetAllPoints()
-        selection:SetColorTexture(0.7, 0.7, 0.1, 0.2)
-        selection:Hide()
-        row.selectionTexture = selection
-
-        -- Item name (left-aligned)
-        local nameText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        nameText:SetPoint("LEFT", row, "LEFT", 5, 0)
-        nameText:SetText(itemName)
-        nameText:SetWidth(150)  -- Fixed width for name
-        
-        -- Price text (center-aligned)
-        local priceText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        priceText:SetPoint("LEFT", nameText, "RIGHT", 10, 0)
-        priceText:SetText(GetCoinTextureString(flipOpportunity.avgBuyPrice))
-        
-        -- Sale Rate text (changed to raw decimal)
-        local saleRateText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        saleRateText:SetPoint("LEFT", priceText, "RIGHT", 10, 0)
-        saleRateText:SetText(string.format("Sale Rate: %.3f", itemData.saleRate))
-        
-        -- Profit text with ROI
-        local profitText = row:CreateFontString(nil, "OVERLAY", "GameFontGreen")
-        profitText:SetPoint("LEFT", saleRateText, "RIGHT", 10, 0)
-        profitText:SetText(string.format(
-            "Profit: %s (%d%% ROI)",
-            GetCoinTextureString(flipOpportunity.totalProfit),
-            flipOpportunity.roi
+        -- Create UI row for profitable item
+        self:CreateProfitableItemRow(flipOpportunity, results)
+    else
+        -- Debug print in yellow for unprofitable items
+        print(string.format(
+            "|cFFFFFF00No profitable flip found for %s (Sale Rate: %.1f%%)|r",
+            itemName,
+            itemData.saleRate * 100
         ))
-        
-        -- Market Value text 
-        local marketValueText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        marketValueText:SetPoint("LEFT", profitText, "RIGHT", 10, 0)
-        marketValueText:SetText(string.format("MV: %s", self:FormatGoldAndSilver(itemData.marketValue)))
-
-        -- Store all auction data with the row
-        row.itemData = {
-            itemID = itemID,
-            minPrice = results[1].minPrice,
-            totalQuantity = results[1].totalQuantity,
-            auctionID = results[1].auctionID,
-            selected = false,
-            allAuctions = results  -- Store all auctions for this item
-        }
-
-        -- Click handler for dropdown functionality
-        row:SetScript("OnClick", function()
-            -- Clear any previous selections
-            if self.selectedRow and self.selectedRow ~= row then
-                self.selectedRow.itemData.selected = false
-                self.selectedRow.selectionTexture:Hide()
-                self.selectedRow.defaultBg:Show()
-                
-                if self.selectedRow.dropDown then
-                    self.selectedRow.dropDown:Hide()
-                end
-            end
-
-            -- Toggle selection
-            row.itemData.selected = not row.itemData.selected
-            row.selectionTexture:SetShown(row.itemData.selected)
-            row.defaultBg:SetShown(not row.itemData.selected)
-            
-            -- Create or toggle dropdown
-            if row.itemData.selected then
-                if not row.dropDown then
-                    -- Create dropdown for additional auctions
-                    local dropDown = CreateFrame("Frame", nil, row)
-                    dropDown:SetFrameStrata("DIALOG")
-                    dropDown:SetSize(row:GetWidth(), ROW_HEIGHT * (#results - 1))
-                    dropDown:SetPoint("TOPLEFT", row, "BOTTOMLEFT", 0, -2)
-                    
-                    -- Dropdown background
-                    local dropBg = dropDown:CreateTexture(nil, "BACKGROUND")
-                    dropBg:SetAllPoints()
-                    dropBg:SetColorTexture(0.1, 0.1, 0.1, 0.95)
-                    
-                    -- Create rows for additional auctions
-                    for i = 1, #results do
-                        local dropRow = CreateFrame("Button", nil, dropDown)
-                        dropRow:SetSize(dropDown:GetWidth(), ROW_HEIGHT)
-                        dropRow:SetPoint("TOPLEFT", dropDown, "TOPLEFT", 0, -(i-1) * ROW_HEIGHT)
-                        
-                        -- Background for dropdown row
-                        local dropRowBg = dropRow:CreateTexture(nil, "BACKGROUND")
-                        dropRowBg:SetAllPoints()
-                        dropRowBg:SetColorTexture(0.1, 0.1, 0.1, 0.5)
-                        dropRow.defaultBg = dropRowBg
-                        
-                        -- Selection texture for dropdown row
-                        local dropRowSelection = dropRow:CreateTexture(nil, "BACKGROUND")
-                        dropRowSelection:SetAllPoints()
-                        dropRowSelection:SetColorTexture(0.7, 0.7, 0.1, 0.2)
-                        dropRowSelection:Hide()
-                        dropRow.selectionTexture = dropRowSelection
-                        
-                        -- Price text
-                        local dropPrice = dropRow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-                        dropPrice:SetPoint("LEFT", dropRow, "LEFT", 5, 0)
-                        dropPrice:SetText(GetCoinTextureString(results[i].minPrice))
-                        
-                        -- Quantity text
-                        local dropQuantity = dropRow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-                        dropQuantity:SetPoint("RIGHT", dropRow, "RIGHT", -5, 0)
-                        dropQuantity:SetText("Qty: " .. results[i].totalQuantity)
-                        
-                        -- Store auction data with the row
-                        dropRow.auctionData = {
-                            itemID = itemID,
-                            minPrice = results[i].minPrice,
-                            totalQuantity = results[i].totalQuantity,
-                            auctionID = results[i].auctionID,
-                            index = i
-                        }
-                        
-                        -- Click handler for dropdown rows
-                        dropRow:SetScript("OnClick", function(self)
-                            -- Clear previous dropdown selections
-                            for _, child in pairs({dropDown:GetChildren()}) do
-                                if child.selectionTexture then
-                                    child.selectionTexture:Hide()
-                                end
-                            end
-                            
-                            -- Show selection for this row
-                            self.selectionTexture:Show()
-                            
-                            -- Update selected item data
-                            row.itemData.minPrice = self.auctionData.minPrice
-                            row.itemData.totalQuantity = self.auctionData.totalQuantity
-                            row.itemData.auctionID = self.auctionData.auctionID
-                            FLIPR.selectedItem = row.itemData
-                        end)
-                    end
-                    
-                    row.dropDown = dropDown
-                end
-                row.dropDown:Show()
-                self.selectedRow = row
-                self.selectedItem = row.itemData
-            else
-                if row.dropDown then
-                    row.dropDown:Hide()
-                end
-                self.selectedRow = nil
-                self.selectedItem = nil
-            end
-        end)
     end
 end
 
@@ -755,5 +530,104 @@ function FLIPR:RescanSingleItem(itemID)
             print("Error: Failed to create item key for", itemID)
         end
     end
+end
+
+function FLIPR:CreateProfitableItemRow(flipOpportunity, results)
+    -- Play sound for profitable item
+    PlaySoundFile("Interface\\AddOns\\FLIPR\\sounds\\VO_GoblinVenM_Greeting06.ogg", "Master")
+    
+    -- Create or get profitable items counter
+    if not self.profitableItemCount then
+        self.profitableItemCount = 0
+    end
+    self.profitableItemCount = self.profitableItemCount + 1
+
+    -- Create row container
+    local rowContainer = CreateFrame("Frame", nil, self.scrollChild)
+    rowContainer:SetSize(self.scrollChild:GetWidth(), ROW_HEIGHT)
+    
+    -- Position based on profitable items count
+    rowContainer:SetPoint("TOPLEFT", self.scrollChild, "TOPLEFT", 0, -((self.profitableItemCount - 1) * ROW_HEIGHT))
+    self.scrollChild:SetHeight(self.profitableItemCount * ROW_HEIGHT)
+
+    -- Main row
+    local row = CreateFrame("Button", nil, rowContainer)
+    row:SetAllPoints(rowContainer)
+    
+    -- Default background
+    local defaultBg = row:CreateTexture(nil, "BACKGROUND")
+    defaultBg:SetAllPoints()
+    defaultBg:SetColorTexture(0.1, 0.1, 0.1, 0.5)
+    row.defaultBg = defaultBg
+
+    -- Selection background
+    local selection = row:CreateTexture(nil, "BACKGROUND")
+    selection:SetAllPoints()
+    selection:SetColorTexture(0.7, 0.7, 0.1, 0.2)
+    selection:Hide()
+    row.selectionTexture = selection
+
+    -- Item name (left-aligned)
+    local nameText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    nameText:SetPoint("LEFT", row, "LEFT", 5, 0)
+    nameText:SetText(results[1].itemName)
+    nameText:SetWidth(150)  -- Fixed width for name
+    
+    -- Price text (center-aligned)
+    local priceText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    priceText:SetPoint("LEFT", nameText, "RIGHT", 10, 0)
+    priceText:SetText(GetCoinTextureString(flipOpportunity.avgBuyPrice))
+    
+    -- Sale Rate text
+    local saleRateText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    saleRateText:SetPoint("LEFT", priceText, "RIGHT", 10, 0)
+    saleRateText:SetText(string.format("Sale Rate: %.3f", flipOpportunity.saleRate))
+    
+    -- Profit text with ROI
+    local profitText = row:CreateFontString(nil, "OVERLAY", "GameFontGreen")
+    profitText:SetPoint("LEFT", saleRateText, "RIGHT", 10, 0)
+    profitText:SetText(string.format(
+        "Profit: %s (%d%% ROI)",
+        GetCoinTextureString(flipOpportunity.totalProfit),
+        flipOpportunity.roi
+    ))
+
+    -- Store auction data with the row
+    row.itemData = {
+        itemID = results[1].itemID,
+        minPrice = results[1].minPrice,
+        totalQuantity = results[1].totalQuantity,
+        auctionID = results[1].auctionID,
+        isCommodity = results[1].isCommodity,
+        selected = false,
+        allAuctions = results  -- Store all auctions for this item
+    }
+
+    -- Click handler for row selection
+    row:SetScript("OnClick", function()
+        -- Clear previous selection
+        if self.selectedRow and self.selectedRow ~= row then
+            self.selectedRow.itemData.selected = false
+            self.selectedRow.selectionTexture:Hide()
+            self.selectedRow.defaultBg:Show()
+            if self.selectedRow.dropDown then
+                self.selectedRow.dropDown:Hide()
+            end
+        end
+
+        -- Toggle selection
+        row.itemData.selected = not row.itemData.selected
+        row.selectionTexture:SetShown(row.itemData.selected)
+        row.defaultBg:SetShown(not row.itemData.selected)
+        
+        -- Update selected item
+        if row.itemData.selected then
+            self.selectedRow = row
+            self.selectedItem = row.itemData
+        else
+            self.selectedRow = nil
+            self.selectedItem = nil
+        end
+    end)
 end
   
