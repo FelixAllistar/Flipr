@@ -21,7 +21,7 @@ local defaultSettings = {
         ["2.High 1000+"] = false,
         ["3.Medium 100+"] = false,
         ["4.Low 10+"] = false,
-        ["5.Very low 1+"] = false
+        ["5.Very Low 1+"] = true
     }
 }
 

@@ -363,7 +363,7 @@ function FLIPR:CreateOptionsSection(contentFrame)
         "2.High 1000+",
         "3.Medium 100+",
         "4.Low 10+",
-        "5.Very low 1+"
+        "5.Very Low 1+"
     }
 
     for i, groupName in ipairs(groups) do

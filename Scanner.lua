@@ -112,29 +112,34 @@ function FLIPR:ScanNextItem()
             return
         end
 
-        -- Only remove and process if we're ready to send query
-        if failedItem.retries < self.maxRetries then
+        -- Check if we've exceeded max retries
+        if failedItem.retries >= self.maxRetries then
+            print("Skipping item after max retries:", failedItem.itemID)
             tremove(self.failedItems, 1)
-            failedItem.retries = failedItem.retries + 1
-            
-            if failedItem.isCommodity then
-                pcall(function()
-                    C_AuctionHouse.SendSearchQuery(nil, {}, true, failedItem.itemID)
-                end)
-            else
-                local itemKey = C_AuctionHouse.MakeItemKey(failedItem.itemID)
-                if itemKey then
-                    pcall(function()
-                        C_AuctionHouse.SendSearchQuery(itemKey, {}, true)
-                    end)
-                end
+            -- Update progress text
+            if self.scanProgressText then
+                self.scanProgressText:SetText(string.format("%d/%d items", self.currentScanIndex, #self.itemIDs))
             end
+            C_Timer.After(0.1, function() self:ScanNextItem() end)
             return
-        else
-            tremove(self.failedItems, 1)
         end
+
+        -- Only remove and process if we're ready to send query
+        tremove(self.failedItems, 1)
+        failedItem.retries = failedItem.retries + 1
         
-        C_Timer.After(0.1, function() self:ScanNextItem() end)
+        if failedItem.isCommodity then
+            pcall(function()
+                C_AuctionHouse.SendSearchQuery(nil, {}, true, failedItem.itemID)
+            end)
+        else
+            local itemKey = C_AuctionHouse.MakeItemKey(failedItem.itemID)
+            if itemKey then
+                pcall(function()
+                    C_AuctionHouse.SendSearchQuery(itemKey, {}, true)
+                end)
+            end
+        end
         return
     end
 
@@ -147,8 +152,7 @@ function FLIPR:ScanNextItem()
         end
 
         local itemID = self.itemIDs[self.currentScanIndex]
-        print(string.format("Scanning item %d/%d: %s", self.currentScanIndex, #self.itemIDs, itemID))
-
+        
         -- Wait for item info to be available
         local itemName, _, _, _, _, itemClass = GetItemInfo(itemID)
         if not itemName then
@@ -158,6 +162,9 @@ function FLIPR:ScanNextItem()
             end)
             return
         end
+
+        -- Only print after we have item info
+        print(string.format("Scanning item %d/%d: %s", self.currentScanIndex, #self.itemIDs, itemID))
 
         -- Check if item is likely a commodity
         local isCommodity = (
@@ -212,13 +219,13 @@ function FLIPR:OnCommoditySearchResults()
     -- First check if we have any results at all
     local numResults = C_AuctionHouse.GetNumCommoditySearchResults(itemID)
     if not numResults or numResults == 0 then
-        -- Add to retry queue
-        table.insert(self.failedItems, {
-            itemID = itemID,
-            isCommodity = true,
-            retries = 0
-        })
-        C_Timer.After(self.retryDelay, function()
+        -- Debug output in red
+        print(string.format("|cFFFF0000No auctions found for item: %s|r", GetItemInfo(itemID) or itemID))
+        
+        -- Process empty results to update UI
+        self:ProcessAuctionResults({})
+        
+        C_Timer.After(0.1, function()
             self:ScanNextItem()
         end)
         return
@@ -266,13 +273,13 @@ function FLIPR:OnItemSearchResults()
     local numResults = C_AuctionHouse.GetNumItemSearchResults(itemKey)
     
     if not numResults or numResults == 0 then
-        -- Add to retry queue
-        table.insert(self.failedItems, {
-            itemID = itemID,
-            isCommodity = false,
-            retries = 0
-        })
-        C_Timer.After(self.retryDelay, function()
+        -- Debug output in red
+        print(string.format("|cFFFF0000No auctions found for item: %s|r", GetItemInfo(itemID) or itemID))
+        
+        -- Process empty results to update UI
+        self:ProcessAuctionResults({})
+        
+        C_Timer.After(0.1, function()
             self:ScanNextItem()
         end)
         return
@@ -319,13 +326,18 @@ function FLIPR:ProcessAuctionResults(results)
     -- Mark this item as processed
     self.processedItems[itemID] = true
 
-    -- Analyze flip opportunity first
+    -- Analyze flip opportunity only if we have results
     local flipOpportunity = nil
     if results and #results > 1 then
         flipOpportunity = self:AnalyzeFlipOpportunity(results, itemID)
     end
 
-    -- Only proceed if profitable
+    -- Update progress text regardless of results
+    if self.scanProgressText then
+        self.scanProgressText:SetText(string.format("%d/%d items", self.currentScanIndex, #self.itemIDs))
+    end
+
+    -- Only proceed with UI updates if profitable
     if flipOpportunity then
         -- Play sound
         PlaySoundFile("Interface\\AddOns\\FLIPR\\sounds\\VO_GoblinVenM_Greeting06.ogg", "Master")
@@ -518,11 +530,6 @@ function FLIPR:ProcessAuctionResults(results)
                 self.selectedItem = nil
             end
         end)
-    end
-
-    -- Update progress text
-    if self.scanProgressText then
-        self.scanProgressText:SetText(string.format("%d/%d items", self.currentScanIndex, #self.itemIDs))
     end
 end
 

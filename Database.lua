@@ -3,9 +3,18 @@ local FLIPR = addon.FLIPR
 
 function FLIPR:LoadGroupData(groupName)
     local tableName = self:GetTableNameFromGroup(groupName)
+    print("Group name:", groupName)
+    print("Generated table name:", tableName)
     print("Looking for table:", tableName)
     local data = _G[tableName]
     print("Found data:", data and "yes" or "no")
+    if data then
+        local count = 0
+        for k,v in pairs(data) do
+            count = count + 1
+        end
+        print("Number of items in table:", count)
+    end
     return data or {}
 end
 
