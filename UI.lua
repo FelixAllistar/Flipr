@@ -293,11 +293,12 @@ function FLIPR:CreateGroupButtons(scrollChild)
     -- Function to recalculate total height and positions
     local function UpdateFramePositions()
         -- Padding constants for different types of spacing
-        local ROOT_GROUP_PADDING = 5        -- Base padding between root groups
-        local ROOT_WITH_CHILDREN_EXTRA = 7  -- Extra padding when root has children
-        local SIBLING_PADDING = 20         -- Normal padding between siblings
-        local ROOT_CHILD_PADDING = 28      -- Padding between root and its first child
-        local CHILD_PARENT_PADDING = 25    -- Padding between non-root parent and child
+        local ROOT_GROUP_PADDING = 5         -- Base padding between root groups
+        local ROOT_WITH_CHILDREN_EXTRA = 7   -- Extra padding when root has children
+        local SIBLING_PADDING = 20          -- Normal padding between siblings
+        local ROOT_CHILD_PADDING = 28       -- Padding between root and its first child
+        local CHILD_PARENT_PADDING = 25     -- Padding between non-root parent and child
+        local NESTED_TO_ROOT_PADDING = 15   -- Special padding when transitioning from nested to root
         
         local currentY = -10
         
@@ -321,11 +322,12 @@ function FLIPR:CreateGroupButtons(scrollChild)
         -- Function to position a container's children
         local function PositionChildren(container, parentY, depth, isRootChild)
             if not container or not container:IsShown() then return end
-            -- Use appropriate padding based on whether it's a root's child
             local y = parentY - (isRootChild and ROOT_CHILD_PADDING or CHILD_PARENT_PADDING)
             
             local children = {container:GetChildren()}
-            for _, child in ipairs(children) do
+            local lastChildWithSubgroups = false
+            
+            for i, child in ipairs(children) do
                 if child:IsShown() then
                     child:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 5 + (depth * 20), y)
                     
@@ -333,15 +335,23 @@ function FLIPR:CreateGroupButtons(scrollChild)
                         child.subgroupContainer:SetPoint("TOPLEFT", child, "BOTTOMLEFT", 0, 0)
                         PositionChildren(child.subgroupContainer, y, depth + 1, false)
                         y = y - GetVisibleHeight(child.subgroupContainer)
+                        lastChildWithSubgroups = true
+                    else
+                        lastChildWithSubgroups = false
                     end
                     
                     y = y - SIBLING_PADDING
                 end
             end
+            
+            -- Return whether this container's last child had subgroups
+            return lastChildWithSubgroups
         end
         
         -- Position root groups
         local isFirstRoot = true
+        local previousHadNestedChildren = false
+        
         for _, frameData in ipairs(masterFrames) do
             frameData.frame:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 5, currentY)
             
@@ -350,9 +360,10 @@ function FLIPR:CreateGroupButtons(scrollChild)
             
             if frameData.frame.subgroupContainer and frameData.frame.subgroupContainer:IsShown() then
                 frameData.frame.subgroupContainer:SetPoint("TOPLEFT", frameData.frame, "BOTTOMLEFT", 0, 0)
-                PositionChildren(frameData.frame.subgroupContainer, currentY, 1, true)
+                local hadNestedChildren = PositionChildren(frameData.frame.subgroupContainer, currentY, 1, true)
                 groupHeight = groupHeight + GetVisibleHeight(frameData.frame.subgroupContainer)
                 hasVisibleChildren = true
+                previousHadNestedChildren = hadNestedChildren
             end
             
             -- Calculate padding for root groups
@@ -361,7 +372,10 @@ function FLIPR:CreateGroupButtons(scrollChild)
                 rootPadding = rootPadding + ROOT_WITH_CHILDREN_EXTRA
             end
             if isFirstRoot then
-                rootPadding = rootPadding + 3  -- Extra padding for first root
+                rootPadding = rootPadding + 3
+            end
+            if previousHadNestedChildren then
+                rootPadding = NESTED_TO_ROOT_PADDING
             end
             
             currentY = currentY - (groupHeight + rootPadding)
