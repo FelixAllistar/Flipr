@@ -83,14 +83,73 @@ function FLIPR:ScanItems()
     if not self.isEventRegistered then
         self:RegisterEvent("COMMODITY_SEARCH_RESULTS_UPDATED", "OnCommoditySearchResults")
         self:RegisterEvent("ITEM_SEARCH_RESULTS_UPDATED", "OnItemSearchResults")
+        self:RegisterEvent("AUCTION_HOUSE_THROTTLED_MESSAGE_RESPONSE_RECEIVED", "OnThrottleResponse")
         self.isEventRegistered = true
     end
 
     -- Reset processed items tracking at start of new scan
     self.processedItems = {}
+    self.failedItems = {}
+    self.waitingForThrottle = false
 
     -- Start scanning first item
     self:ScanNextItem()
+end
+
+function FLIPR:OnThrottleResponse()
+    if self.waitingForThrottle then
+        self.waitingForThrottle = false
+        self:ScanNextItem()  -- Continue with the current item
+    end
+end
+
+function FLIPR:DoubleCheckAuctions(itemID, itemKey, isRetry)
+    -- Helper function to thoroughly check for auctions
+    local function checkResults()
+        -- Try commodity results first
+        local commodityResults = C_AuctionHouse.GetNumCommoditySearchResults(itemID)
+        if commodityResults and commodityResults > 0 then
+            return true
+        end
+
+        -- Try item results
+        if itemKey then
+            local itemResults = C_AuctionHouse.GetNumItemSearchResults(itemKey)
+            if itemResults and itemResults > 0 then
+                return true
+            end
+        end
+
+        -- Check if we're still waiting for full results
+        if C_AuctionHouse.HasFullCommoditySearchResults then
+            local hasFullResults = C_AuctionHouse.HasFullCommoditySearchResults(itemID)
+            if not hasFullResults then
+                return "waiting"
+            end
+        end
+
+        return false
+    end
+
+    local hasResults = checkResults()
+    if hasResults == true then
+        return true
+    elseif hasResults == "waiting" then
+        print("Still waiting for full results...")
+        C_Timer.After(1, function()
+            self:DoubleCheckAuctions(itemID, itemKey, true)
+        end)
+        return "waiting"
+    elseif not isRetry then
+        -- No results found, wait 5s and try one more time
+        print("No results found, waiting 5s to double-check...")
+        C_Timer.After(5, function()
+            self:DoubleCheckAuctions(itemID, itemKey, true)
+        end)
+        return "waiting"
+    else
+        return false
+    end
 end
 
 function FLIPR:ScanNextItem()
@@ -118,7 +177,7 @@ function FLIPR:ScanNextItem()
         if not itemData then
             print(string.format("|cFFFF0000Item %d not found in database, skipping|r", itemID))
             self.currentScanIndex = self.currentScanIndex + 1
-            self:ScanNextItem()
+            C_Timer.After(0.5, function() self:ScanNextItem() end)
             return
         end
         
@@ -126,10 +185,10 @@ function FLIPR:ScanNextItem()
         print(string.format("|cFFFFFFFFScanning item %d/%d: %s (%d)|r", 
             self.currentScanIndex, #self.itemIDs, itemData.name, itemID))
 
-        -- Wait for throttle
+        -- Wait for throttle with a longer timeout
         if not C_AuctionHouse.IsThrottledMessageSystemReady() then
-            print("Throttled, waiting...")
-            C_Timer.After(0.5, function() self:ScanNextItem() end)
+            print("Throttled, waiting 2s...")
+            C_Timer.After(2, function() self:ScanNextItem() end)
             return
         end
 
@@ -143,16 +202,40 @@ function FLIPR:ScanNextItem()
         local itemKey = C_AuctionHouse.MakeItemKey(itemID)
         if not itemKey then
             print(string.format("|cFFFF0000Failed to create item key for item ID: %d|r", itemID))
-            self.currentScanIndex = self.currentScanIndex + 1
-            self:ScanNextItem()
+            -- Add to failed items and retry later
+            if not self.failedItems[itemID] then
+                self.failedItems[itemID] = 0
+            end
+            self.failedItems[itemID] = self.failedItems[itemID] + 1
+            
+            if self.failedItems[itemID] <= self.maxRetries then
+                print(string.format("Retry %d/%d for item %d", self.failedItems[itemID], self.maxRetries, itemID))
+                C_Timer.After(2, function() self:ScanNextItem() end)
+            else
+                print(string.format("|cFFFF0000Max retries reached for item %d, skipping|r", itemID))
+                self.currentScanIndex = self.currentScanIndex + 1
+                C_Timer.After(0.5, function() self:ScanNextItem() end)
+            end
             return
         end
 
         local itemInfo = C_AuctionHouse.GetItemKeyInfo(itemKey)
         if not itemInfo then
             print(string.format("|cFFFF0000Failed to get item info for item ID: %d|r", itemID))
-            self.currentScanIndex = self.currentScanIndex + 1
-            self:ScanNextItem()
+            -- Add to failed items and retry later
+            if not self.failedItems[itemID] then
+                self.failedItems[itemID] = 0
+            end
+            self.failedItems[itemID] = self.failedItems[itemID] + 1
+            
+            if self.failedItems[itemID] <= self.maxRetries then
+                print(string.format("Retry %d/%d for item %d", self.failedItems[itemID], self.maxRetries, itemID))
+                C_Timer.After(2, function() self:ScanNextItem() end)
+            else
+                print(string.format("|cFFFF0000Max retries reached for item %d, skipping|r", itemID))
+                self.currentScanIndex = self.currentScanIndex + 1
+                C_Timer.After(0.5, function() self:ScanNextItem() end)
+            end
             return
         end
         
@@ -221,20 +304,34 @@ function FLIPR:OnCommoditySearchResults()
     -- First check if we have any results at all
     local numResults = C_AuctionHouse.GetNumCommoditySearchResults(itemID)
     if not numResults or numResults == 0 then
-        print(string.format("|cFFFF0000No auctions found for item: %s|r", GetItemInfo(itemID) or itemID))
-        self.currentScanIndex = self.currentScanIndex + 1
-        self:ScanNextItem()
-        return
+        -- Double check before giving up
+        local itemKey = C_AuctionHouse.MakeItemKey(itemID)
+        local checkResult = self:DoubleCheckAuctions(itemID, itemKey)
+        if checkResult == "waiting" then
+            return -- Will retry from DoubleCheckAuctions
+        elseif not checkResult then
+            print(string.format("|cFFFF0000No auctions found for item: %s|r", GetItemInfo(itemID) or itemID))
+            self.currentScanIndex = self.currentScanIndex + 1
+            C_Timer.After(0.5, function() self:ScanNextItem() end)
+            return
+        end
     end
 
     -- Check if we have all results yet
     if not C_AuctionHouse.HasFullCommoditySearchResults(itemID) then
-        C_AuctionHouse.RequestMoreCommoditySearchResults(itemID)
+        C_Timer.After(1, function()
+            C_AuctionHouse.RequestMoreCommoditySearchResults(itemID)
+        end)
         return  -- Wait for another COMMODITY_SEARCH_RESULTS_UPDATED event
     end
 
     local itemInfo = C_AuctionHouse.GetItemKeyInfo(C_AuctionHouse.MakeItemKey(itemID))
-    if not itemInfo then return end
+    if not itemInfo then 
+        -- Failed to get item info, increment and continue
+        self.currentScanIndex = self.currentScanIndex + 1
+        C_Timer.After(0.5, function() self:ScanNextItem() end)
+        return 
+    end
     
     local processedResults = {}
     for i = 1, numResults do
@@ -254,8 +351,9 @@ function FLIPR:OnCommoditySearchResults()
         self:ProcessAuctionResults(processedResults)
     end
     
+    -- Always increment and continue after processing
     self.currentScanIndex = self.currentScanIndex + 1
-    self:ScanNextItem()
+    C_Timer.After(0.5, function() self:ScanNextItem() end)
 end
 
 function FLIPR:OnItemSearchResults()
@@ -268,7 +366,7 @@ function FLIPR:OnItemSearchResults()
     if not numResults or numResults == 0 then
         print(string.format("|cFFFF0000No auctions found for item: %s|r", GetItemInfo(itemID) or itemID))
         self.currentScanIndex = self.currentScanIndex + 1
-        self:ScanNextItem()
+        C_Timer.After(0.1, function() self:ScanNextItem() end)
         return
     end
 
@@ -291,8 +389,9 @@ function FLIPR:OnItemSearchResults()
         self:ProcessAuctionResults(processedResults)
     end
     
+    -- Always increment and continue after processing
     self.currentScanIndex = self.currentScanIndex + 1
-    self:ScanNextItem()
+    C_Timer.After(0.1, function() self:ScanNextItem() end)
 end
 
 function FLIPR:ProcessAuctionResults(results)
@@ -596,7 +695,7 @@ function FLIPR:CreateProfitableItemRow(flipOpportunity, results)
     defaultBg:SetAllPoints()
     defaultBg:SetColorTexture(0.1, 0.1, 0.1, 0.5)
     row.defaultBg = defaultBg
-
+    
     -- Selection background
     local selection = row:CreateTexture(nil, "BACKGROUND")
     selection:SetAllPoints()
@@ -615,10 +714,15 @@ function FLIPR:CreateProfitableItemRow(flipOpportunity, results)
     priceText:SetPoint("LEFT", nameText, "RIGHT", 10, 0)
     priceText:SetText(GetCoinTextureString(flipOpportunity.avgBuyPrice))
     
+    -- Stock text
+    local stockText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    stockText:SetPoint("LEFT", priceText, "RIGHT", 10, 0)
+    stockText:SetText(string.format("Stock: %d/%d", flipOpportunity.currentInventory, flipOpportunity.maxInventory))
+    
     -- Sale Rate text
     local saleRateText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    saleRateText:SetPoint("LEFT", priceText, "RIGHT", 10, 0)
-    saleRateText:SetText(string.format("Sale Rate: %.3f", flipOpportunity.saleRate))
+    saleRateText:SetPoint("LEFT", stockText, "RIGHT", 10, 0)
+    saleRateText:SetText(string.format("Sale Rate: %.1f%%", flipOpportunity.saleRate * 100))
     
     -- Profit text with ROI
     local profitText = row:CreateFontString(nil, "OVERLAY", "GameFontGreen")

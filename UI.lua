@@ -81,8 +81,8 @@ function FLIPR:CreateFLIPRTab()
     contentFrame:Hide()
     
     -- Constants
-    local SIDEBAR_WIDTH = 350
-    local BOTTOM_MARGIN = 25
+    local SIDEBAR_WIDTH = 200
+    local BOTTOM_MARGIN = 5
     local TITLE_HEIGHT = 30
     
     -- Create title section at the top
