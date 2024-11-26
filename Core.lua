@@ -35,6 +35,43 @@ function FLIPR:GetAvailableGroups()
     return groups
 end
 
+function FLIPR:GetItemsFromGroup(groupTable, path)
+    local items = {}
+    local currentTable = groupTable
+    
+    -- If no path specified, return all items recursively
+    if not path then
+        if currentTable.items then
+            for itemId, itemData in pairs(currentTable.items) do
+                items[itemId] = itemData
+            end
+        end
+        -- Recursively get items from subgroups
+        for key, value in pairs(currentTable) do
+            if type(value) == "table" and key ~= "items" and key ~= "name" then
+                local subItems = self:GetItemsFromGroup(value)
+                for itemId, itemData in pairs(subItems) do
+                    items[itemId] = itemData
+                end
+            end
+        end
+        return items
+    end
+    
+    -- Navigate through the path
+    local pathParts = {strsplit("/", path)}
+    for _, part in ipairs(pathParts) do
+        if currentTable[part] then
+            currentTable = currentTable[part]
+        else
+            return {}  -- Path not found
+        end
+    end
+    
+    -- Return items from this level and below
+    return self:GetItemsFromGroup(currentTable)
+end
+
 function FLIPR:InitializeDB()
     print("Initializing database...")
     self.itemDB = {}
@@ -44,14 +81,12 @@ function FLIPR:InitializeDB()
     print("Loading items from enabled groups...")
     for tableName, groupData in pairs(self.availableGroups) do
         print("Processing table:", tableName)
-        if groupData.items then
-            for groupPath, enabled in pairs(self.db.enabledGroups) do
-                if enabled then
-                    print("Loading enabled group:", groupPath)
-                    local items = groupData:GetItemsByGroup(groupPath)
-                    for itemId, itemData in pairs(items) do
-                        self.itemDB[itemId] = itemData
-                    end
+        for groupPath, enabled in pairs(self.db.enabledGroups) do
+            if enabled then
+                print("Loading enabled group:", groupPath)
+                local items = self:GetItemsFromGroup(groupData, groupPath)
+                for itemId, itemData in pairs(items) do
+                    self.itemDB[itemId] = itemData
                 end
             end
         end

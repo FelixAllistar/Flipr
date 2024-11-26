@@ -67,6 +67,7 @@ function FLIPR:OnAuctionHouseShow()
 end
 
 function FLIPR:CreateFLIPRTab()
+    print("=== CreateFLIPRTab START ===")
     local numTabs = #AuctionHouseFrame.Tabs + 1
     local fliprTab = CreateFrame("Button", "AuctionHouseFrameTab"..numTabs, AuctionHouseFrame, "AuctionHouseFrameTabTemplate") 
     fliprTab:SetID(numTabs)
@@ -126,8 +127,11 @@ function FLIPR:CreateFLIPRTab()
     self.sidebarContainer = sidebarContainer
     self.resultsContainer = resultsContainer
     
+    print("Created all main frames")
+    
     -- Our tab's click handler
     fliprTab:SetScript("OnClick", function()
+        print("FLIPR tab clicked")
         -- Hide all default frames
         AuctionHouseFrame.BrowseResultsFrame:Hide()
         AuctionHouseFrame.CategoriesList:Hide()
@@ -158,11 +162,14 @@ function FLIPR:CreateFLIPRTab()
     self.fliprTab = fliprTab
 
     -- Create UI sections in the correct order
+    print("Creating UI sections...")
     self:CreateOptionsSection(sidebarContainer)
     self:CreateResultsSection(resultsContainer)
+    print("=== CreateFLIPRTab END ===")
 end
 
 function FLIPR:CreateOptionsSection(parent)
+    print("=== CreateOptionsSection START ===")
     -- Create scrollable container for the options, positioned below the "Groups" title
     local scrollFrame = CreateFrame("ScrollFrame", nil, parent, "UIPanelScrollFrameTemplate")
     scrollFrame:SetPoint("TOPLEFT", parent, "TOPLEFT", 5, -30)  -- Leave space for title
@@ -172,8 +179,11 @@ function FLIPR:CreateOptionsSection(parent)
     scrollChild:SetWidth(scrollFrame:GetWidth())
     scrollFrame:SetScrollChild(scrollChild)
     
+    print("Created scroll frame and child")
+    
     -- Create the group buttons in the scroll child
     self:CreateGroupButtons(scrollChild)
+    print("=== CreateOptionsSection END ===")
 end
 
 function FLIPR:CreateResultsSection(parent)
@@ -191,49 +201,91 @@ function FLIPR:CreateResultsSection(parent)
     self.scrollChild = scrollChild
 end
 
-function FLIPR:CreateGroupCheckbox(parent, text, groupPath, tableName, level)
-    local checkbox = CreateFrame("CheckButton", nil, parent, "ChatConfigCheckButtonTemplate")
-    checkbox:SetPoint("TOPLEFT", 20 * (level or 0), 0)
-    checkbox.Text:SetText(text)
+function FLIPR:CreateGroupButtons(parent)
+    print("=== CreateGroupButtons START ===")
+    -- Store reference to the group frame
+    self.groupFrame = parent
     
-    -- Set initial state
-    checkbox:SetChecked(self.db.enabledGroups[groupPath] or false)
-    
-    -- Set up expand/collapse button if needed
-    local structure = self.groupStructure[tableName]
-    local node = structure
-    for part in groupPath:gmatch("[^/]+") do
-        node = node[part]
-        if not node then break end
+    -- Build group structure
+    self.groupStructure = {}
+    print("Available groups:")
+    for tableName, groupData in pairs(self.availableGroups) do
+        print("  Found table:", tableName)
+        print("  Group data name:", groupData.name)
+        print("  Keys in group data:")
+        for k, v in pairs(groupData) do
+            if type(v) == "table" then
+                print("    -", k, "(table)")
+            else
+                print("    -", k, "=", v)
+            end
+        end
+        self.groupStructure[tableName] = self:BuildGroupStructure(groupData)
     end
     
-    local expandButton
-    if node and next(node.children) then
-        expandButton = CreateFrame("Button", nil, checkbox)
-        expandButton:SetSize(16, 16)
-        expandButton:SetPoint("RIGHT", checkbox, "LEFT", -2, 0)
-        
-        -- Set texture based on state
-        local isExpanded = self.db.expandedGroups[groupPath]
-        expandButton:SetNormalTexture(isExpanded and "Interface\\Buttons\\UI-MinusButton-Up" or "Interface\\Buttons\\UI-PlusButton-Up")
-        
-        expandButton:SetScript("OnClick", function()
-            self.db.expandedGroups[groupPath] = not self.db.expandedGroups[groupPath]
-            self:RefreshGroupList()
-        end)
+    -- Create checkboxes
+    self:RefreshGroupList()
+    print("=== CreateGroupButtons END ===")
+end
+
+function FLIPR:BuildGroupStructure(groupData)
+    print("Building structure for:", groupData.name)
+    local structure = {
+        name = groupData.name,
+        children = {},
+        items = groupData.items or {}
+    }
+    
+    -- Process each subgroup
+    for key, value in pairs(groupData) do
+        -- Skip special keys and non-table values
+        if type(value) == "table" and key ~= "items" and key ~= "name" then
+            -- If it has a name field, it's a subgroup
+            if value.name then
+                print("  Found subgroup:", value.name)
+                -- Store using the actual name as the key
+                structure.children[value.name] = {
+                    name = value.name,
+                    children = {},
+                    items = value.items or {}
+                }
+                -- Process children recursively
+                for subKey, subValue in pairs(value) do
+                    if type(subValue) == "table" and subKey ~= "items" and subKey ~= "name" then
+                        if subValue.name then
+                            structure.children[value.name].children[subValue.name] = self:BuildGroupStructure(subValue)
+                        end
+                    end
+                end
+            end
+        end
     end
     
-    -- Checkbox click handler
-    checkbox:SetScript("OnClick", function()
-        local checked = checkbox:GetChecked()
-        self:ToggleGroupState(tableName, groupPath, checked)
-    end)
+    -- Debug print children
+    if next(structure.children) then
+        print("  Children for", groupData.name .. ":")
+        for childName, childData in pairs(structure.children) do
+            print("    -", childName)
+            if next(childData.children) then
+                for grandChildName, _ in pairs(childData.children) do
+                    print("      *", grandChildName)
+                end
+            end
+        end
+    else
+        print("  No children for", groupData.name)
+    end
     
-    return checkbox, expandButton
+    return structure
 end
 
 function FLIPR:RefreshGroupList()
-    if not self.groupFrame then return end
+    if not self.groupFrame then 
+        print("No group frame found!")
+        return 
+    end
+    
+    print("Refreshing group list...")
     
     -- Clear existing checkboxes
     for _, child in pairs({self.groupFrame:GetChildren()}) do
@@ -244,327 +296,139 @@ function FLIPR:RefreshGroupList()
     local yOffset = -10
     
     -- Helper function to add groups recursively
-    local function addGroups(node, prefix, level)
-        for name, data in pairs(node) do
-            local fullPath = prefix and (prefix .. "/" .. name) or name
+    local function addGroups(node, prefix, level, tableName)
+        if not node then 
+            print("Nil node encountered")
+            return yOffset 
+        end
+        
+        -- Create checkbox for current node if it has a name
+        if node.name then
+            local fullPath = prefix and (prefix .. "/" .. node.name) or node.name
+            local displayName = node.name
             
-            -- Create checkbox for this group
-            local checkbox, expandButton = self:CreateGroupCheckbox(
-                self.groupFrame, 
-                name, 
-                fullPath, 
-                data.tableName, 
-                level
-            )
-            checkbox:SetPoint("TOPLEFT", 10 + (20 * level), yOffset)
+            print(string.format("Creating checkbox for '%s' at level %d", displayName, level))
+            local container, expandButton = self:CreateGroupCheckbox(self.groupFrame, displayName, fullPath, tableName, level)
+            container:SetPoint("TOPLEFT", self.groupFrame, "TOPLEFT", 0, yOffset)
             
+            if expandButton then
+                print("  Created expand button for", displayName)
+            end
+            
+            -- Update yOffset for next item
             yOffset = yOffset - 25
             
             -- If expanded and has children, add them
-            if self.db.expandedGroups[fullPath] and next(data.children) then
-                addGroups(data.children, fullPath, level + 1)
+            if self.db.expandedGroups[fullPath] and next(node.children) then
+                print("  Group is expanded:", fullPath)
+                for childName, childNode in pairs(node.children) do
+                    yOffset = addGroups(childNode, fullPath, level + 1, tableName)
+                end
+            else
+                print("  Group is collapsed:", fullPath)
             end
         end
+        
+        return yOffset
     end
     
     -- Add groups for each table
+    print("Processing available groups:")
     for tableName, structure in pairs(self.groupStructure) do
-        -- Add table name header
-        local header = self.groupFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-        header:SetPoint("TOPLEFT", 10, yOffset)
-        header:SetText(tableName:gsub("FLIPR_", ""))
-        yOffset = yOffset - 30
-        
-        -- Add groups
-        addGroups(structure, nil, 0)
-        yOffset = yOffset - 10  -- Extra space between tables
+        print("Processing table:", tableName)
+        yOffset = addGroups(structure, nil, 0, tableName)
     end
     
-    -- Update frame height
-    self.groupFrame:SetHeight(math.abs(yOffset) + 20)
+    -- Update parent frame height
+    self.groupFrame:SetHeight(math.abs(yOffset) + 10)
 end
 
-function FLIPR:CreateGroupButtons(scrollChild)
-    print("Creating group buttons in scrollChild")
-    local yOffset = -5
-    local masterFrames = {}
-    local allContainers = {}  -- Track all containers for positioning
+function FLIPR:CreateGroupCheckbox(parent, text, groupPath, tableName, level)
+    print("Creating checkbox for:", text, "path:", groupPath)
     
-    -- Function to recalculate total height and positions
-    local function UpdateFramePositions()
-        -- Padding constants for different types of spacing
-        local ROOT_GROUP_PADDING = 5         -- Base padding between root groups
-        local ROOT_WITH_CHILDREN_EXTRA = 7   -- Extra padding when root has children
-        local SIBLING_PADDING = 20          -- Normal padding between siblings
-        local ROOT_CHILD_PADDING = 28       -- Padding between root and its first child
-        local CHILD_PARENT_PADDING = 25     -- Padding between non-root parent and child
-        local NESTED_TO_ROOT_PADDING = 15   -- Special padding when transitioning from nested to root
-        
-        local currentY = -10
-        
-        -- Function to get total height of visible children
-        local function GetVisibleHeight(container)
-            if not container or not container:IsShown() then return 0 end
-            local height = 0
-            
-            for _, child in ipairs({container:GetChildren()}) do
-                if child:IsShown() then
-                    height = height + SIBLING_PADDING
-                    if child.subgroupContainer and child.subgroupContainer:IsShown() then
-                        height = height + GetVisibleHeight(child.subgroupContainer)
-                    end
-                end
-            end
-            
-            return height
-        end
-        
-        -- Function to position a container's children
-        local function PositionChildren(container, parentY, depth, isRootChild)
-            if not container or not container:IsShown() then return end
-            local y = parentY - (isRootChild and ROOT_CHILD_PADDING or CHILD_PARENT_PADDING)
-            
-            local children = {container:GetChildren()}
-            local lastChildWithSubgroups = false
-            
-            for i, child in ipairs(children) do
-                if child:IsShown() then
-                    child:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 5 + (depth * 20), y)
-                    
-                    if child.subgroupContainer and child.subgroupContainer:IsShown() then
-                        child.subgroupContainer:SetPoint("TOPLEFT", child, "BOTTOMLEFT", 0, 0)
-                        PositionChildren(child.subgroupContainer, y, depth + 1, false)
-                        y = y - GetVisibleHeight(child.subgroupContainer)
-                        lastChildWithSubgroups = true
-                    else
-                        lastChildWithSubgroups = false
-                    end
-                    
-                    y = y - SIBLING_PADDING
-                end
-            end
-            
-            -- Return whether this container's last child had subgroups
-            return lastChildWithSubgroups
-        end
-        
-        -- Position root groups
-        local isFirstRoot = true
-        local previousHadNestedChildren = false
-        
-        for _, frameData in ipairs(masterFrames) do
-            frameData.frame:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 5, currentY)
-            
-            local groupHeight = SIBLING_PADDING
-            local hasVisibleChildren = false
-            
-            if frameData.frame.subgroupContainer and frameData.frame.subgroupContainer:IsShown() then
-                frameData.frame.subgroupContainer:SetPoint("TOPLEFT", frameData.frame, "BOTTOMLEFT", 0, 0)
-                local hadNestedChildren = PositionChildren(frameData.frame.subgroupContainer, currentY, 1, true)
-                groupHeight = groupHeight + GetVisibleHeight(frameData.frame.subgroupContainer)
-                hasVisibleChildren = true
-                previousHadNestedChildren = hadNestedChildren
-            end
-            
-            -- Calculate padding for root groups
-            local rootPadding = ROOT_GROUP_PADDING
-            if hasVisibleChildren then
-                rootPadding = rootPadding + ROOT_WITH_CHILDREN_EXTRA
-            end
-            if isFirstRoot then
-                rootPadding = rootPadding + 3
-            end
-            if previousHadNestedChildren then
-                rootPadding = NESTED_TO_ROOT_PADDING
-            end
-            
-            currentY = currentY - (groupHeight + rootPadding)
-            isFirstRoot = false
-        end
-        
-        scrollChild:SetHeight(math.max(math.abs(currentY) + 5, 40))
+    -- Create container frame for checkbox and expand button
+    local container = CreateFrame("Frame", nil, parent)
+    container:SetSize(parent:GetWidth(), 20)
+    
+    -- Create expand button first if needed
+    local expandButton
+    local structure = self.groupStructure[tableName]
+    if not structure then
+        print("  No structure found for table:", tableName)
+        return container
     end
     
-    -- Function to handle group expansion
-    local function ToggleGroup(button)
-        if not button.subgroupContainer then return end
+    -- Find the correct node in the structure
+    local node = structure
+    if groupPath ~= structure.name then
+        local pathParts = {strsplit("/", groupPath)}
+        print("  Looking for path parts:", table.concat(pathParts, ", "))
         
-        -- Toggle container visibility
-        local show = not button.subgroupContainer:IsShown()
-        button.subgroupContainer:SetShown(show)
-        
-        -- Update button texture
-        if button.expandButton then
-            button.expandButton:SetNormalTexture(show and 
-                "Interface\\Buttons\\UI-MinusButton-Up" or 
-                "Interface\\Buttons\\UI-PlusButton-Up")
+        -- Skip the first part if it matches the root
+        local startIndex = 1
+        if pathParts[1] == structure.name then
+            startIndex = 2
         end
         
-        -- Recalculate all positions
-        UpdateFramePositions()
-    end
-    
-    -- Function to organize groups into a tree structure
-    local function BuildGroupTree(groups)
-        local tree = {}
-        for key, path in pairs(groups) do
-            local parts = {strsplit("/", path)}
-            local current = tree
-            for _, part in ipairs(parts) do
-                if not current[part] then
-                    current[part] = {
-                        children = {},
-                        path = current.path and (current.path .. "/" .. part) or part
-                    }
-                end
-                current = current[part].children
+        -- Navigate through children using names
+        for i = startIndex, #pathParts do
+            if node and node.children and node.children[pathParts[i]] then
+                node = node.children[pathParts[i]]
+                print("    Found child:", pathParts[i])
+            else
+                print("    Could not find child:", pathParts[i])
+                node = nil
+                break
             end
         end
-        return tree
     end
     
-    -- Function to create group UI recursively
-    local function CreateGroupUI(container, node, level, parentPath)
-        local height = 0
+    -- Create expand button if the node has children
+    if node and node.children and next(node.children) then
+        print("  Creating expand button for", text, "(has children)")
+        expandButton = CreateFrame("Button", nil, container)
+        expandButton:SetSize(16, 16)
+        expandButton:SetPoint("LEFT", container, "LEFT", 20 * level, 0)
         
-        for name, data in pairs(node) do
-            if name ~= "children" and name ~= "path" then
-                -- Create group frame
-                local groupFrame = CreateFrame("Frame", nil, container)
-                groupFrame:SetSize(container:GetWidth() - (level * 20), 20)
-                
-                -- Add background
-                local bg = groupFrame:CreateTexture(nil, "BACKGROUND")
-                bg:SetAllPoints()
-                bg:SetColorTexture(0.1, 0.1, 0.1, 0.8)
-                
-                -- Create checkbox
-                local checkbox = CreateFrame("CheckButton", nil, groupFrame, "ChatConfigCheckButtonTemplate")
-                checkbox:SetPoint("LEFT", groupFrame, "LEFT", 5, 0)
-                checkbox:SetSize(20, 20)
-                checkbox.Text:SetText(name)
-                checkbox.Text:SetFontObject("GameFontNormalSmall")
-                checkbox.Text:SetPoint("LEFT", checkbox, "RIGHT", 2, 0)
-                
-                local fullPath = parentPath and (parentPath .. "/" .. name) or name
-                checkbox:SetChecked(self.db.enabledGroups[fullPath] or false)
-                
-                checkbox:SetScript("OnClick", function()
-                    local checked = checkbox:GetChecked()
-                    print("Group clicked:", fullPath, checked)
-                    self:ToggleGroupState(data.tableName, fullPath, checked)
-                end)
-                
-                -- If has children, add expand button
-                if data.children and next(data.children) then
-                    local expandButton = CreateFrame("Button", nil, groupFrame)
-                    expandButton:SetSize(14, 14)
-                    expandButton:SetPoint("RIGHT", groupFrame, "RIGHT", -5, 0)
-                    expandButton:SetNormalTexture("Interface\\Buttons\\UI-PlusButton-Up")
-                    expandButton:EnableMouse(true)
-                    expandButton:SetFrameLevel(checkbox:GetFrameLevel() + 1)
-                    
-                    -- Create container for children
-                    local childContainer = CreateFrame("Frame", nil, container)
-                    childContainer:SetWidth(container:GetWidth() - ((level + 1) * 20))
-                    childContainer:Hide()
-                    
-                    -- Create children recursively
-                    CreateGroupUI(childContainer, data.children, level + 1, fullPath)
-                    
-                    groupFrame.subgroupContainer = childContainer
-                    groupFrame.expandButton = expandButton
-                    
-                    -- Set up expand button handler
-                    expandButton:SetScript("OnMouseDown", function(self, mouseButton)
-                        if mouseButton == "LeftButton" then
-                            ToggleGroup(groupFrame)
-                        end
-                    end)
-                end
-                
-                height = height + 25
-            end
-        end
+        -- Set texture based on state
+        local isExpanded = self.db.expandedGroups[groupPath]
+        expandButton:SetNormalTexture(isExpanded and "Interface\\Buttons\\UI-MinusButton-Up" or "Interface\\Buttons\\UI-PlusButton-Up")
         
-        return height
-    end
-    
-    -- Get available master groups
-    local masterGroups = self:GetMasterGroups()
-    local numGroups = 0
-    for name, groupData in pairs(masterGroups) do
-        print("Found group:", name, groupData.name)
-        numGroups = numGroups + 1
-    end
-    
-    if numGroups == 0 then
-        local text = scrollChild:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        text:SetPoint("CENTER", scrollChild, "CENTER", 0, 0)
-        text:SetText("No TSM groups loaded. Use the scraper to download some groups.")
-        scrollChild:SetHeight(40)
-        return
-    end
-    
-    -- Create master groups
-    for tableName, groupData in pairs(masterGroups) do
-        -- Create master group frame
-        local masterFrame = CreateFrame("Frame", nil, scrollChild)
-        masterFrame:SetSize(scrollChild:GetWidth() - 10, 25)
-        
-        -- Add background
-        local bg = masterFrame:CreateTexture(nil, "BACKGROUND")
-        bg:SetAllPoints()
-        bg:SetColorTexture(0.1, 0.1, 0.1, 0.8)
-        
-        -- Create master checkbox
-        local masterCheckbox = CreateFrame("CheckButton", nil, masterFrame, "ChatConfigCheckButtonTemplate")
-        masterCheckbox:SetPoint("LEFT", masterFrame, "LEFT", 5, 0)
-        masterCheckbox.Text:SetText(groupData.name)
-        masterCheckbox.Text:SetFontObject("GameFontNormalSmall")
-        masterCheckbox:SetChecked(self.db.enabledGroups[groupData.name] or false)
-        
-        -- Create expand button if has subgroups
-        if groupData.groups then
-            local expandButton = CreateFrame("Button", nil, masterFrame)
-            expandButton:SetSize(14, 14)
-            expandButton:SetPoint("RIGHT", masterFrame, "RIGHT", -5, 0)
-            expandButton:SetNormalTexture("Interface\\Buttons\\UI-PlusButton-Up")
-            expandButton:EnableMouse(true)
-            
-            -- Create subgroup container
-            local subgroupContainer = CreateFrame("Frame", nil, scrollChild)
-            subgroupContainer:SetWidth(scrollChild:GetWidth() - 10)
-            subgroupContainer:Hide()
-            
-            -- Build and create subgroup tree
-            local groupTree = BuildGroupTree(groupData.groups)
-            CreateGroupUI(subgroupContainer, groupTree, 1, groupData.name)  -- Actually create the subgroup frames
-            
-            masterFrame.subgroupContainer = subgroupContainer
-            masterFrame.expandButton = expandButton
-            
-            -- Set up expand button handler
-            expandButton:SetScript("OnMouseDown", function(self, mouseButton)
-                if mouseButton == "LeftButton" then
-                    ToggleGroup(masterFrame)
-                end
-            end)
-        end
-        
-        -- Master checkbox handler
-        masterCheckbox:SetScript("OnClick", function()
-            local checked = masterCheckbox:GetChecked()
-            print("Master group clicked:", groupData.name, checked)
-            self:ToggleGroupState(tableName, groupData.name, checked)
+        expandButton:SetScript("OnClick", function()
+            print("Expand button clicked for:", groupPath)
+            self.db.expandedGroups[groupPath] = not self.db.expandedGroups[groupPath]
+            self:RefreshGroupList()
         end)
-        
-        table.insert(masterFrames, {frame = masterFrame})
     end
     
-    -- Initial positioning
-    UpdateFramePositions()
-    print("Group buttons creation complete")
+    -- Create checkbox after expand button
+    local checkbox = CreateFrame("CheckButton", nil, container, "ChatConfigCheckButtonTemplate")
+    if expandButton then
+        checkbox:SetPoint("LEFT", expandButton, "RIGHT", 2, 0)
+    else
+        checkbox:SetPoint("LEFT", container, "LEFT", 20 * level, 0)
+    end
+    checkbox.Text:SetText(text)
+    
+    -- Set initial state
+    checkbox:SetChecked(self.db.enabledGroups[groupPath] or false)
+    
+    -- Checkbox click handler
+    checkbox:SetScript("OnClick", function()
+        local checked = checkbox:GetChecked()
+        print("Checkbox clicked:", groupPath, checked)
+        self:ToggleGroupState(tableName, groupPath, checked)
+    end)
+    
+    return container, expandButton
+end
+
+function FLIPR:ToggleGroupState(tableName, groupPath, checked)
+    -- Update enabled state
+    self.db.enabledGroups[groupPath] = checked
+    
+    -- Reinitialize database to update available items
+    self:InitializeDB()
 end
 
 function FLIPR:UpdateGroupContainerHeights()

@@ -126,7 +126,7 @@ function FLIPR:ScanNextItem()
         -- Check if item is a commodity using AH API
         local itemKey = C_AuctionHouse.MakeItemKey(itemID)
         if not itemKey then
-            print(string.format("|cFFFF0000Failed to create item key for: %s (%d)|r", itemData.name, itemID))
+            print(string.format("|cFFFF0000Failed to create item key for item ID: %d|r", itemID))
             self.currentScanIndex = self.currentScanIndex + 1
             self:ScanNextItem()
             return
@@ -134,7 +134,7 @@ function FLIPR:ScanNextItem()
 
         local itemInfo = C_AuctionHouse.GetItemKeyInfo(itemKey)
         if not itemInfo then
-            print(string.format("|cFFFF0000Failed to get item info for: %s (%d)|r", itemData.name, itemID))
+            print(string.format("|cFFFF0000Failed to get item info for item ID: %d|r", itemID))
             self.currentScanIndex = self.currentScanIndex + 1
             self:ScanNextItem()
             return

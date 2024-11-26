@@ -201,6 +201,44 @@ class TSMScraper:
             return {}
 
     @staticmethod
+    def sanitize_lua_identifier(s):
+        """
+        Convert a string into a valid Lua identifier by:
+        1. Removing all non-alphanumeric characters
+        2. Ensuring it starts with a letter
+        """
+        # Remove all non-alphanumeric characters
+        s = ''.join(c for c in s if c.isalnum())
+        
+        # Ensure it starts with a letter
+        if s and not s[0].isalpha():
+            s = 'F' + s
+            
+        return s
+
+    @staticmethod
+    def escape_lua_string(s):
+        """
+        Escape a string for use in Lua.
+        Handles all special characters including quotes, backslashes, and non-printable characters.
+        """
+        # First, escape any backslashes and quotes
+        s = s.replace('\\', '\\\\')
+        s = s.replace('"', '\\"')
+        s = s.replace("'", "\\'")
+        
+        # Handle non-printable and special ASCII characters
+        result = []
+        for char in s:
+            if ord(char) < 32 or ord(char) > 126:
+                # Use decimal escape for non-printable characters
+                result.append('\\' + str(ord(char)))
+            else:
+                result.append(char)
+        
+        return ''.join(result)
+
+    @staticmethod
     def split_and_save_data(items_data, progress_callback=print):
         # Initialize dictionary to organize items by their full path
         organized_data = {}
@@ -213,16 +251,27 @@ class TSMScraper:
             if master_group is None:
                 master_group = subGroup.split('/')[0]
             
-            if subGroup not in organized_data:
-                organized_data[subGroup] = []
-            organized_data[subGroup].append({
-                'id': item_id,
-                'comment': data['name'],
-                'name': data['name'],
-                'subGroup': subGroup,
-                'marketValue': data['marketValue'],
-                'saleRate': data['saleRate']
-            })
+            # Split the subGroup path into parts
+            path_parts = subGroup.split('/')
+            
+            # Build nested structure
+            current_dict = organized_data
+            for i, part in enumerate(path_parts):
+                if i == len(path_parts) - 1:  # Last part - add item here
+                    if part not in current_dict:
+                        current_dict[part] = {'name': part, 'items': {}}
+                    if 'items' not in current_dict[part]:
+                        current_dict[part]['items'] = {}
+                    current_dict[part]['items'][item_id] = {
+                        'name': data['name'],
+                        'marketValue': data['marketValue'],
+                        'saleRate': data['saleRate'],
+                        'subGroup': subGroup  # Keep full path for reference
+                    }
+                else:
+                    if part not in current_dict:
+                        current_dict[part] = {'name': part}
+                    current_dict = current_dict[part]
 
         # Get output directory (same as executable location)
         output_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
@@ -239,10 +288,9 @@ class TSMScraper:
                     existing_groups.add(match.group(1))
         
         # Remove old version of this group if it exists
-        safe_master = master_group.replace(' ', '')
+        safe_master = TSMScraper.sanitize_lua_identifier(master_group)
         if safe_master in existing_groups:
             progress_callback(f"Removing existing group: {master_group}")
-            # Use regex to remove the entire group definition
             pattern = f"FLIPR_{safe_master}\\s*=\\s*{{[^}}]*}}\\s*\n"
             existing_content = re.sub(pattern, '', existing_content)
         
@@ -257,49 +305,41 @@ class TSMScraper:
                 if not existing_content.endswith('\n\n'):
                     file.write('\n\n')
             
-            # Create the master table
-            master_var = f"FLIPR_{master_group.replace(' ', '')}"
+            # Create the master table with sanitized name
+            master_var = f"FLIPR_{TSMScraper.sanitize_lua_identifier(master_group)}"
+            file.write(f"-- Original name: {TSMScraper.escape_lua_string(master_group)}\n")
             file.write(f"{master_var} = {{\n")
-            file.write("    -- Master group information\n")
-            file.write(f"    name = \"{master_group}\",\n")
-            file.write("    groups = {},\n")
-            file.write("    items = {},\n")
             
-            # Write helper function
-            file.write(f"    GetItemsByGroup = function(self, group)\n")
-            file.write("        if group == nil then\n")
-            file.write("            return self.items\n")
-            file.write("        end\n")
-            file.write("        local items = {}\n")
-            file.write("        for id, item in pairs(self.items) do\n")
-            file.write("            if item.subGroup:find(group, 1, true) then\n")
-            file.write("                items[id] = item\n")
-            file.write("            end\n")
-            file.write("        end\n")
-            file.write("        return items\n")
-            file.write("    end,\n")
+            # Helper function to write nested tables
+            def write_table(data, indent=0):
+                indent_str = "    " * indent
+                # Write name first if it exists
+                if 'name' in data:
+                    file.write(f"{indent_str}name = \"{TSMScraper.escape_lua_string(data['name'])}\",\n")
+                
+                # Write items if they exist
+                if 'items' in data and data['items']:
+                    file.write(f"{indent_str}items = {{\n")
+                    for item_id, item_data in data['items'].items():
+                        file.write(f"{indent_str}    [{item_id}] = {{ -- {TSMScraper.escape_lua_string(item_data['name'])}\n")
+                        file.write(f"{indent_str}        name = \"{TSMScraper.escape_lua_string(item_data['name'])}\",\n")
+                        file.write(f"{indent_str}        marketValue = {item_data['marketValue']},\n")
+                        file.write(f"{indent_str}        saleRate = {item_data['saleRate']},\n")
+                        file.write(f"{indent_str}        subGroup = \"{TSMScraper.escape_lua_string(item_data['subGroup'])}\"\n")
+                        file.write(f"{indent_str}    }},\n")
+                    file.write(f"{indent_str}}},\n")
+                
+                # Write other tables (subgroups)
+                for key, value in data.items():
+                    if key not in ['name', 'items'] and isinstance(value, dict):
+                        # Use square brackets for the key
+                        file.write(f"{indent_str}[\"{TSMScraper.escape_lua_string(key)}\"] = {{\n")
+                        write_table(value, indent + 1)
+                        file.write(f"{indent_str}}},\n")
             
-            # Write groups table
-            file.write("    groups = {\n")
-            for group in sorted(organized_data.keys()):
-                # Remove master group from display name but keep in key for uniqueness
-                display_name = group.replace(f"{master_group}/", "")
-                safe_group = group.replace(' ', '_').replace('/', '_').replace('+', 'plus')
-                file.write(f"        [\"{safe_group}\"] = \"{display_name}\",\n")
-            file.write("    },\n")
+            # Write the nested structure
+            write_table(organized_data[master_group], 1)
             
-            # Write items table
-            file.write("    items = {\n")
-            for group, items in organized_data.items():
-                file.write(f"        -- {group}\n")
-                for item in sorted(items, key=lambda x: int(x['id'])):
-                    file.write(f"        [{item['id']}] = {{ -- {item['comment']}\n")
-                    file.write(f"            name = \"{item['name']}\",\n")
-                    file.write(f"            subGroup = \"{item['subGroup']}\",\n")
-                    file.write(f"            marketValue = {item['marketValue']},\n")
-                    file.write(f"            saleRate = {item['saleRate']}\n")
-                    file.write("        },\n")
-            file.write("    }\n")
             file.write("}\n")
 
 class TSMScraperGUI:
