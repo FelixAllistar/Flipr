@@ -28,7 +28,6 @@ function FLIPR:ScanItems()
         self.isScanning = true
         if self.scanButton then
             self.scanButton:SetText("Pause Scan")
-            self.scanButton.buttonText:SetText("Pause Scan")
         end
         self:ScanNextItem()
         return
@@ -40,7 +39,6 @@ function FLIPR:ScanItems()
         self.isScanning = false
         if self.scanButton then
             self.scanButton:SetText("Resume Scan")
-            self.scanButton.buttonText:SetText("Resume Scan")
         end
         return
     end
@@ -50,7 +48,6 @@ function FLIPR:ScanItems()
     self.isPaused = false
     if self.scanButton then
         self.scanButton:SetText("Pause Scan")
-        self.scanButton.buttonText:SetText("Pause Scan")
     end
 
     -- Get items from enabled groups
@@ -61,7 +58,6 @@ function FLIPR:ScanItems()
         self.isScanning = false
         if self.scanButton then
             self.scanButton:SetText("Scan Items")
-            self.scanButton.buttonText:SetText("Scan Items")
         end
         if self.scanProgressText then
             self.scanProgressText:SetText("")
@@ -157,7 +153,6 @@ function FLIPR:ScanNextItem()
         self.isScanning = false
         if self.scanButton then
             self.scanButton:SetText("Scan Items")
-            self.scanButton.buttonText:SetText("Scan Items")
         end
         
         if self.scanProgressText then

@@ -452,7 +452,7 @@ function FLIPR:CreateGroupButtons(scrollChild)
                 checkbox:SetScript("OnClick", function()
                     local checked = checkbox:GetChecked()
                     print("Group clicked:", fullPath, checked)
-                    self:ToggleGroupState(nil, fullPath, checked)
+                    self:ToggleGroupState(data.tableName, fullPath, checked)
                 end)
                 
                 -- If has children, add expand button

@@ -161,23 +161,45 @@ end
 
 -- Helper function to toggle a group and all its children
 function FLIPR:ToggleGroupState(tableName, groupPath, state)
+    print("ToggleGroupState called with:", tableName, groupPath, state)  -- Debug print
+    
+    if not tableName then
+        print("No tableName provided for group:", groupPath)
+        return
+    end
+    
     local groupData = self.availableGroups[tableName]
-    if groupData then
-        if groupData.groups and groupData.groups[groupPath] then
-            -- This is a subgroup path
-            local subGroupPath = groupData.groups[groupPath]
-            print("Enabling subgroup:", subGroupPath)
-            self.db.enabledGroups[subGroupPath] = state
-        else
-            -- This is a master group, enable/disable all subgroups
-            print("Enabling master group:", groupPath)
-            -- Enable the master group itself
-            self.db.enabledGroups[groupPath] = state
-            -- And all its subgroups
-            for _, subGroupPath in pairs(groupData.groups or {}) do
+    if not groupData then
+        print("No group data found for table:", tableName)
+        return
+    end
+    
+    if groupData.groups and groupData.groups[groupPath] then
+        -- This is a subgroup path
+        local subGroupPath = groupData.groups[groupPath]
+        print("Enabling subgroup:", subGroupPath)
+        self.db.enabledGroups[subGroupPath] = state
+    else
+        -- This is a master group, enable/disable all subgroups
+        print("Enabling master group:", groupPath)
+        -- Enable the master group itself
+        self.db.enabledGroups[groupPath] = state
+        -- And all its subgroups
+        for _, subGroupPath in pairs(groupData.groups or {}) do
+            if subGroupPath:find("^" .. groupPath .. "/") then
+                print("  Enabling child group:", subGroupPath)
                 self.db.enabledGroups[subGroupPath] = state
             end
         end
-        self:UpdateScanItems()
     end
+    
+    -- Print enabled groups for debugging
+    print("Currently enabled groups:")
+    for group, enabled in pairs(self.db.enabledGroups) do
+        if enabled then
+            print("  -", group)
+        end
+    end
+    
+    self:UpdateScanItems()
 end 
