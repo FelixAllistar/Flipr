@@ -1,9 +1,16 @@
 local addonName, addon = ...
 local FLIPR = addon.FLIPR
 local ROW_HEIGHT = 25
+local MAX_DROPDOWN_ROWS = 10
+local DROPDOWN_PADDING = 2
+local DROPDOWN_TOTAL_HEIGHT = (MAX_DROPDOWN_ROWS * ROW_HEIGHT) + DROPDOWN_PADDING
 
 FLIPR.scanTimer = 0
 FLIPR.scanStartTime = 0
+
+-- Store rows by itemID
+FLIPR.itemRows = {}
+FLIPR.expandedItemID = nil
 
 function FLIPR:CancelScan()
     -- Stop scanning
@@ -564,5 +571,312 @@ function FLIPR:CreateTitleButtons(titleSection)
     self.buyButton = buyButton
     scanButton:SetScript("OnClick", function() self:ScanItems() end)
     cancelButton:SetScript("OnClick", function() self:CancelScan() end)
+end
+
+function FLIPR:CreateProfitableItemRow(flipOpportunity, results)
+    -- Play sound for profitable item
+    PlaySoundFile("Interface\\AddOns\\FLIPR\\sounds\\VO_GoblinVenM_Greeting06.ogg", "Master")
+    
+    local itemID = results[1].itemID
+    
+    -- Create row container
+    local rowContainer = CreateFrame("Frame", nil, self.scrollChild)
+    rowContainer:SetSize(self.scrollChild:GetWidth(), ROW_HEIGHT)
+    
+    -- Store row index
+    self.profitableItemCount = (self.profitableItemCount or 0) + 1
+    rowContainer.rowIndex = self.profitableItemCount
+    
+    -- Store in our itemRows table
+    self.itemRows[itemID] = {
+        frame = rowContainer,
+        rowIndex = self.profitableItemCount,
+        results = results,
+        flipOpportunity = flipOpportunity
+    }
+    
+    -- Initial position
+    self:UpdateRowPositions()
+
+    -- Create the main row button
+    local row = CreateFrame("Button", nil, rowContainer)
+    row:SetAllPoints(rowContainer)
+    
+    -- Default background
+    local defaultBg = row:CreateTexture(nil, "BACKGROUND")
+    defaultBg:SetAllPoints()
+    defaultBg:SetColorTexture(0.1, 0.1, 0.1, 0.5)
+    row.defaultBg = defaultBg
+    
+    -- Selection background
+    local selection = row:CreateTexture(nil, "BACKGROUND")
+    selection:SetAllPoints()
+    selection:SetColorTexture(0.7, 0.7, 0.1, 0.2)
+    selection:Hide()
+    row.selectionTexture = selection
+
+    -- Item name (left-aligned)
+    local nameText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    nameText:SetPoint("LEFT", row, "LEFT", 5, 0)
+    nameText:SetText(results[1].itemName)
+    nameText:SetWidth(150)  -- Fixed width for name
+    
+    -- Price text (center-aligned)
+    local priceText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    priceText:SetPoint("LEFT", nameText, "RIGHT", 10, 0)
+    priceText:SetText(GetCoinTextureString(flipOpportunity.avgBuyPrice))
+    
+    -- Stock text
+    local stockText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    stockText:SetPoint("LEFT", priceText, "RIGHT", 10, 0)
+    stockText:SetText(string.format("Inv:%d/%d", flipOpportunity.currentInventory, flipOpportunity.maxInventory))
+    
+    -- Sale Rate text (just the decimal)
+    local saleRateText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    saleRateText:SetPoint("LEFT", stockText, "RIGHT", 10, 0)
+    saleRateText:SetText(string.format(".%d", math.floor(flipOpportunity.saleRate * 1000)))
+    
+    -- Profit text with ROI
+    local profitText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    profitText:SetPoint("LEFT", saleRateText, "RIGHT", 10, 0)
+    profitText:SetText(string.format(
+        "%s (ROI: %d%%)",
+        GetCoinTextureString(flipOpportunity.totalProfit),
+        flipOpportunity.roi
+    ))
+
+    -- Store item data with the row
+    row.itemData = {
+        itemID = results[1].itemID,
+        minPrice = results[1].minPrice,
+        totalQuantity = results[1].totalQuantity,
+        auctionID = results[1].auctionID,
+        isCommodity = results[1].isCommodity,
+        selected = false,
+        allAuctions = results
+    }
+
+    -- Click handler for row selection
+    row:SetScript("OnClick", function()
+        if self.expandedItemID == itemID then
+            -- Collapse if clicking same item
+            self:CollapseDropdown()
+            row.itemData.selected = false
+            row.selectionTexture:Hide()
+            row.defaultBg:Show()
+            self.selectedItem = nil
+        else
+            -- Collapse previous and expand new
+            self:CollapseDropdown()
+            self:ExpandDropdown(itemID)
+            row.itemData.selected = true
+            row.selectionTexture:Show()
+            row.defaultBg:Hide()
+            self.selectedItem = row.itemData
+        end
+    end)
+end
+
+function FLIPR:UpdateRowPositions()
+    local expandedIndex = self.expandedItemID and self.itemRows[self.expandedItemID].rowIndex or 0
+    
+    for id, rowData in pairs(self.itemRows) do
+        local yOffset = (rowData.rowIndex - 1) * ROW_HEIGHT
+        
+        -- If this row is below an expanded row, add dropdown height
+        if expandedIndex > 0 and rowData.rowIndex > expandedIndex then
+            yOffset = yOffset + DROPDOWN_TOTAL_HEIGHT
+        end
+        
+        rowData.frame:ClearAllPoints()
+        rowData.frame:SetPoint("TOPLEFT", self.scrollChild, "TOPLEFT", 0, -yOffset)
+        rowData.frame:SetPoint("TOPRIGHT", self.scrollChild, "TOPRIGHT", 0, -yOffset)
+    end
+    
+    -- Update scroll child height
+    local totalHeight = (self.profitableItemCount * ROW_HEIGHT)
+    if self.expandedItemID then
+        totalHeight = totalHeight + DROPDOWN_TOTAL_HEIGHT
+    end
+    self.scrollChild:SetHeight(math.max(1, totalHeight))
+end
+
+function FLIPR:CollapseDropdown()
+    if not self.expandedItemID then return end
+    
+    local rowData = self.itemRows[self.expandedItemID]
+    if rowData and rowData.dropdown then
+        rowData.dropdown:Hide()
+        rowData.dropdown:SetParent(nil)
+        rowData.dropdown = nil
+    end
+    
+    self.expandedItemID = nil
+    self:UpdateRowPositions()
+end
+
+function FLIPR:ExpandDropdown(itemID)
+    local rowData = self.itemRows[itemID]
+    if not rowData then return end
+    
+    -- Create dropdown
+    local dropdown = CreateFrame("Frame", nil, rowData.frame)
+    dropdown:SetPoint("TOPLEFT", rowData.frame, "BOTTOMLEFT", 0, 0)
+    dropdown:SetPoint("TOPRIGHT", rowData.frame, "BOTTOMRIGHT", 0, 0)
+    dropdown:SetHeight(MAX_DROPDOWN_ROWS * ROW_HEIGHT)
+    
+    -- Create child auction rows
+    self:CreateDropdownRows(dropdown, rowData.results)
+    
+    rowData.dropdown = dropdown
+    self.expandedItemID = itemID
+    self:UpdateRowPositions()
+    
+    -- Auto-select first row
+    self:SelectAuctionRange(dropdown, 1)
+end
+
+function FLIPR:CreateDropdownRows(dropdown, results)
+    local numRows = math.min(MAX_DROPDOWN_ROWS, #results)
+    dropdown.rows = {}
+    
+    for i = 1, numRows do
+        local auction = results[i]
+        local row = CreateFrame("Button", nil, dropdown)
+        row:SetHeight(ROW_HEIGHT)
+        row:SetPoint("TOPLEFT", dropdown, "TOPLEFT", 0, -ROW_HEIGHT * (i-1))
+        row:SetPoint("TOPRIGHT", dropdown, "TOPRIGHT", 0, -ROW_HEIGHT * (i-1))
+        
+        -- Background
+        local bg = row:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints()
+        bg:SetColorTexture(0.1, 0.1, 0.1, 0.3)
+        row.defaultBg = bg
+        
+        -- Selection highlight
+        local highlight = row:CreateTexture(nil, "BACKGROUND")
+        highlight:SetAllPoints()
+        highlight:SetColorTexture(0.7, 0.7, 0.1, 0.2)
+        highlight:Hide()
+        row.selectionTexture = highlight
+        
+        -- Price text
+        local priceText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        priceText:SetPoint("LEFT", row, "LEFT", 155, 0)  -- Align with main row price
+        priceText:SetText(GetCoinTextureString(auction.minPrice))
+        
+        -- Quantity text
+        local quantityText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        quantityText:SetPoint("LEFT", priceText, "RIGHT", 10, 0)
+        quantityText:SetText("x" .. auction.totalQuantity)
+        
+        -- Store data
+        row.auctionData = auction
+        row.index = i
+        dropdown.rows[i] = row
+        
+        -- Click handler
+        row:SetScript("OnClick", function()
+            self:SelectAuctionRange(dropdown, i)
+        end)
+    end
+end
+
+function FLIPR:SelectAuctionRange(dropdown, selectedIndex)
+    -- Update selection visuals and gather selected auctions
+    local selectedAuctions = {}
+    local totalCost = 0
+    local totalQuantity = 0
+    
+    for i, row in ipairs(dropdown.rows) do
+        local isSelected = i <= selectedIndex
+        row.selectionTexture:SetShown(isSelected)
+        
+        if isSelected then
+            selectedAuctions[i] = row.auctionData
+            totalCost = totalCost + (row.auctionData.minPrice * row.auctionData.totalQuantity)
+            totalQuantity = totalQuantity + row.auctionData.totalQuantity
+        end
+    end
+    
+    -- Store selected auctions info
+    local rowData = self.itemRows[self.expandedItemID]
+    if rowData then
+        rowData.selectedAuctions = selectedAuctions
+        rowData.totalCost = totalCost
+        rowData.totalQuantity = totalQuantity
+    end
+end
+
+function FLIPR:BuySelectedAuctions()
+    if not self.selectedItem then
+        print("No items selected!")
+        return
+    end
+    
+    local itemData = self.selectedItem
+    local totalCost = itemData.minPrice * itemData.totalQuantity
+    
+    -- If we have expanded auctions selected, use those instead
+    if self.expandedItemID and self.itemRows[self.expandedItemID].selectedAuctions then
+        local rowData = self.itemRows[self.expandedItemID]
+        totalCost = rowData.totalCost
+        itemData.totalQuantity = rowData.totalQuantity
+        itemData.selectedAuctions = rowData.selectedAuctions
+    end
+
+    StaticPopupDialogs["FLIPR_CONFIRM_PURCHASE"] = {
+        text = string.format("Purchase %d items for %s?", 
+            itemData.totalQuantity, 
+            GetCoinTextureString(totalCost)),
+        button1 = "Yes",
+        button2 = "No",
+        OnAccept = function()
+            if itemData.selectedAuctions then
+                -- Buy multiple selected auctions
+                for _, auction in pairs(itemData.selectedAuctions) do
+                    if auction.isCommodity then
+                        C_AuctionHouse.PurchaseCommodity(auction.itemID, auction.quantity, auction.minPrice)
+                    else
+                        C_AuctionHouse.PlaceBid(auction.auctionID, auction.minPrice)
+                    end
+                end
+            else
+                -- Buy single auction
+                if itemData.isCommodity then
+                    C_AuctionHouse.PurchaseCommodity(itemData.itemID, itemData.totalQuantity, itemData.minPrice)
+                else
+                    C_AuctionHouse.PlaceBid(itemData.auctionID, itemData.minPrice)
+                end
+            end
+            
+            -- Collapse and refresh
+            self:CollapseDropdown()
+            self:RescanItem(itemData.itemID)
+        end,
+        timeout = 0,
+        whileDead = true,
+        hideOnEscape = true,
+        preferredIndex = 3,
+    }
+    StaticPopup_Show("FLIPR_CONFIRM_PURCHASE")
+end
+
+function FLIPR:RescanItem(itemID)
+    local rowData = self.itemRows[itemID]
+    if not rowData then return end
+    
+    -- Remove the row
+    rowData.frame:Hide()
+    rowData.frame:SetParent(nil)
+    self.itemRows[itemID] = nil
+    
+    -- Rescan the item
+    if rowData.flipOpportunity.isCommodity then
+        C_AuctionHouse.SendSearchQuery(nil, {}, true, itemID)
+    else
+        local itemKey = C_AuctionHouse.MakeItemKey(itemID)
+        C_AuctionHouse.SendSearchQuery(itemKey, {}, true)
+    end
 end
  

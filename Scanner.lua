@@ -581,7 +581,7 @@ function FLIPR:ProcessAuctionResults(results)
             itemData.saleRate * 100
         ))
         
-        -- Create UI row for profitable item
+        -- Create UI row for profitable item using UI function
         self:CreateProfitableItemRow(flipOpportunity, results)
     else
         -- Debug print in yellow for unprofitable items
@@ -815,110 +815,6 @@ function FLIPR:RescanSingleItem(itemID)
             print("Error: Failed to create item key for", itemID)
         end
     end
-end
-
-function FLIPR:CreateProfitableItemRow(flipOpportunity, results)
-    -- Play sound for profitable item
-    PlaySoundFile("Interface\\AddOns\\FLIPR\\sounds\\VO_GoblinVenM_Greeting06.ogg", "Master")
-    
-    -- Create or get profitable items counter
-    if not self.profitableItemCount then
-        self.profitableItemCount = 0
-    end
-    self.profitableItemCount = self.profitableItemCount + 1
-
-    -- Create row container
-    local rowContainer = CreateFrame("Frame", nil, self.scrollChild)
-    rowContainer:SetSize(self.scrollChild:GetWidth(), ROW_HEIGHT)
-    
-    -- Position based on profitable items count
-    rowContainer:SetPoint("TOPLEFT", self.scrollChild, "TOPLEFT", 0, -((self.profitableItemCount - 1) * ROW_HEIGHT))
-    self.scrollChild:SetHeight(self.profitableItemCount * ROW_HEIGHT)
-
-    -- Main row
-    local row = CreateFrame("Button", nil, rowContainer)
-    row:SetAllPoints(rowContainer)
-    
-    -- Default background
-    local defaultBg = row:CreateTexture(nil, "BACKGROUND")
-    defaultBg:SetAllPoints()
-    defaultBg:SetColorTexture(0.1, 0.1, 0.1, 0.5)
-    row.defaultBg = defaultBg
-    
-    -- Selection background
-    local selection = row:CreateTexture(nil, "BACKGROUND")
-    selection:SetAllPoints()
-    selection:SetColorTexture(0.7, 0.7, 0.1, 0.2)
-    selection:Hide()
-    row.selectionTexture = selection
-
-    -- Item name (left-aligned)
-    local nameText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    nameText:SetPoint("LEFT", row, "LEFT", 5, 0)
-    nameText:SetText(results[1].itemName)
-    nameText:SetWidth(150)  -- Fixed width for name
-    
-    -- Price text (center-aligned)
-    local priceText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    priceText:SetPoint("LEFT", nameText, "RIGHT", 10, 0)
-    priceText:SetText(GetCoinTextureString(flipOpportunity.avgBuyPrice))
-    
-    -- Stock text
-    local stockText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    stockText:SetPoint("LEFT", priceText, "RIGHT", 10, 0)
-    stockText:SetText(string.format("Stock: %d/%d", flipOpportunity.currentInventory, flipOpportunity.maxInventory))
-    
-    -- Sale Rate text
-    local saleRateText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    saleRateText:SetPoint("LEFT", stockText, "RIGHT", 10, 0)
-    saleRateText:SetText(string.format("Sale Rate: %.1f%%", flipOpportunity.saleRate * 100))
-    
-    -- Profit text with ROI
-    local profitText = row:CreateFontString(nil, "OVERLAY", "GameFontGreen")
-    profitText:SetPoint("LEFT", saleRateText, "RIGHT", 10, 0)
-    profitText:SetText(string.format(
-        "Profit: %s (%d%% ROI)",
-        GetCoinTextureString(flipOpportunity.totalProfit),
-        flipOpportunity.roi
-    ))
-
-    -- Store auction data with the row
-    row.itemData = {
-        itemID = results[1].itemID,
-        minPrice = results[1].minPrice,
-        totalQuantity = results[1].totalQuantity,
-        auctionID = results[1].auctionID,
-        isCommodity = results[1].isCommodity,
-        selected = false,
-        allAuctions = results  -- Store all auctions for this item
-    }
-
-    -- Click handler for row selection
-    row:SetScript("OnClick", function()
-        -- Clear previous selection
-        if self.selectedRow and self.selectedRow ~= row then
-            self.selectedRow.itemData.selected = false
-            self.selectedRow.selectionTexture:Hide()
-            self.selectedRow.defaultBg:Show()
-            if self.selectedRow.dropDown then
-                self.selectedRow.dropDown:Hide()
-            end
-        end
-
-        -- Toggle selection
-        row.itemData.selected = not row.itemData.selected
-        row.selectionTexture:SetShown(row.itemData.selected)
-        row.defaultBg:SetShown(not row.itemData.selected)
-        
-        -- Update selected item
-        if row.itemData.selected then
-            self.selectedRow = row
-            self.selectedItem = row.itemData
-        else
-            self.selectedRow = nil
-            self.selectedItem = nil
-        end
-    end)
 end
 
 -- Add a function to cancel any pending timers
