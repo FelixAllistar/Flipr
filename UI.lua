@@ -488,9 +488,52 @@ function FLIPR:CreateTitleButtons(titleSection)
     cancelButton:SetPoint("LEFT", scanButton, "RIGHT", 5, 0)
     cancelButton:SetText("X")
     
+    -- Create GROUP TEST button
+    local groupTestButton = CreateFrame("Button", nil, titleSection, "UIPanelButtonTemplate")
+    groupTestButton:SetSize(100, 22)
+    groupTestButton:SetPoint("LEFT", cancelButton, "RIGHT", 5, 0)
+    groupTestButton:SetText("GROUP TEST")
+    
+    local defaultGroupString = "vj9VojtquCy4OUHcALcl5kWm)FMd9yNbJFKOfM4QIXpsqGGwyTvED4v0gVICb25DKUNmN93zNZjZrFp9FxE)4BVAY1tpz9zkZ5dhV8P))WY3NV8LHtwmB4nR2Sy2x3958rATky0)8N6F43ESj5T21NEW51tx96ZVLR6A6LPFpTPykwOafvH6cnfAl0vyxFDArLAQ2rNvfAQ2mFKngu2dU32TNMIHyZGojzfDipkGszLmilIVlr)AhOS0iYkCde6SKZMuEuarvTgzqwucrcdjmu1swl)nNcrchFNNZIre9lr1e9J9s7hIkj4(XUkjmhIdr)ydjkfsJSihkGY)xrtwdjmKWqct(olSRelvzxjo6IRuLSE6mVRe2AcBdHDGKNY2HuH2FdCbv39ZBIbBwB73JTQD229WpenTpN71j)ofDX2bV6IJRBgu3uv30RUF)()("
+    
+    -- Add click handler for GROUP TEST
+    groupTestButton:SetScript("OnClick", function()
+        local AceGUI = LibStub("AceGUI-3.0")
+        
+        -- Create a container frame
+        local frame = AceGUI:Create("Frame")
+        frame:SetTitle("TSM Group Import Test")
+        frame:SetLayout("Flow")
+        frame:SetWidth(500)
+        frame:SetHeight(300)
+        
+        -- Add instructions text
+        local label = AceGUI:Create("Label")
+        label:SetText("Paste TSM Group Export String:")
+        label:SetFullWidth(true)
+        frame:AddChild(label)
+        
+        -- Add multiline editbox
+        local editbox = AceGUI:Create("MultiLineEditBox")
+        editbox:SetLabel("")
+        editbox:SetFullWidth(true)
+        editbox:SetHeight(200)
+        editbox:SetText(defaultGroupString)  -- Set default text
+        frame:AddChild(editbox)
+        
+        -- Add test button
+        local testButton = AceGUI:Create("Button")
+        testButton:SetText("Test Import")
+        testButton:SetWidth(150)
+        testButton:SetCallback("OnClick", function()
+            TestTSMImport(editbox:GetText())
+        end)
+        frame:AddChild(testButton)
+    end)
+    
     -- Add progress text
     local progressText = titleSection:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    progressText:SetPoint("LEFT", cancelButton, "RIGHT", 10, 0)
+    progressText:SetPoint("LEFT", groupTestButton, "RIGHT", 10, 0)
     progressText:SetText("")  -- Start empty
     progressText:SetTextColor(0.7, 0.7, 0.7, 1)
     self.scanProgressText = progressText

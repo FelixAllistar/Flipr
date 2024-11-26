@@ -9,6 +9,10 @@ Libs\LibStub\LibStub.lua
 Libs\AceAddon-3.0\AceAddon-3.0.xml
 Libs\AceEvent-3.0\AceEvent-3.0.xml
 Libs\AceHook-3.0\AceHook-3.0.xml
+Libs\LibDeflate\LibDeflate.lua
+Libs\LibSerialize\LibSerialize.lua
+Libs\LibSerialize\lib.xml
+Libs\Ace3\AceSerializer-3.0\AceSerializer-3.0.xml
 
 # Data Tables
 DataTables.lua
@@ -16,6 +20,7 @@ DataTables.lua
 # Core files
 Core.lua
 Database.lua
+GroupTest.lua
 UI.lua
 Scanner.lua
 Purchase.lua
