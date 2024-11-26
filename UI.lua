@@ -292,65 +292,72 @@ function FLIPR:CreateGroupButtons(scrollChild)
     
     -- Function to recalculate total height and positions
     local function UpdateFramePositions()
-        -- First position all root frames
-        local currentY = -5
+        local currentY = -10
         
         -- Function to get total height of visible children
         local function GetVisibleHeight(container)
             if not container or not container:IsShown() then return 0 end
             local height = 0
+            
             for _, child in ipairs({container:GetChildren()}) do
                 if child:IsShown() then
-                    height = height + 25  -- Height of the child itself
-                    -- Add height of child's visible children
+                    height = height + 20
                     if child.subgroupContainer and child.subgroupContainer:IsShown() then
                         height = height + GetVisibleHeight(child.subgroupContainer)
                     end
                 end
             end
+            
             return height
         end
         
         -- Function to position a container's children
-        local function PositionChildren(container, parentY, depth)
+        local function PositionChildren(container, parentY, depth, isRootChild)
             if not container or not container:IsShown() then return end
-            local y = parentY - 25  -- Start below parent
+            local y = parentY - (isRootChild and 28 or 25)
             
-            for _, child in ipairs({container:GetChildren()}) do
+            local children = {container:GetChildren()}
+            for _, child in ipairs(children) do
                 if child:IsShown() then
-                    -- Position this child
                     child:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 5 + (depth * 20), y)
                     
-                    -- If this child has visible children, position them
                     if child.subgroupContainer and child.subgroupContainer:IsShown() then
                         child.subgroupContainer:SetPoint("TOPLEFT", child, "BOTTOMLEFT", 0, 0)
-                        PositionChildren(child.subgroupContainer, y, depth + 1)
-                        -- Move down by height of child's container
+                        PositionChildren(child.subgroupContainer, y, depth + 1, false)
                         y = y - GetVisibleHeight(child.subgroupContainer)
                     end
                     
-                    y = y - 25  -- Move down for next sibling
+                    y = y - 20
                 end
             end
         end
         
-        -- Position each root group and its children
-        for i, frameData in ipairs(masterFrames) do
-            -- Position root frame
+        -- Position root groups
+        local isFirstRoot = true
+        for _, frameData in ipairs(masterFrames) do
             frameData.frame:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 5, currentY)
             
-            -- If this root has visible children, position them
+            local groupHeight = 20
+            local hasVisibleChildren = false
+            
             if frameData.frame.subgroupContainer and frameData.frame.subgroupContainer:IsShown() then
                 frameData.frame.subgroupContainer:SetPoint("TOPLEFT", frameData.frame, "BOTTOMLEFT", 0, 0)
-                PositionChildren(frameData.frame.subgroupContainer, currentY, 1)
-                -- Move down by height of container
-                currentY = currentY - GetVisibleHeight(frameData.frame.subgroupContainer)
+                PositionChildren(frameData.frame.subgroupContainer, currentY, 1, true)
+                groupHeight = groupHeight + GetVisibleHeight(frameData.frame.subgroupContainer)
+                hasVisibleChildren = true
             end
             
-            currentY = currentY - 25  -- Move down for next root
+            -- Add extra padding if this root group has visible children
+            local padding = hasVisibleChildren and 12 or 5
+            
+            if isFirstRoot then
+                currentY = currentY - (groupHeight + padding + 3)  -- Extra 3px for first root
+                isFirstRoot = false
+            else
+                currentY = currentY - (groupHeight + padding)
+            end
         end
         
-        -- Set scroll height
         scrollChild:SetHeight(math.max(math.abs(currentY) + 5, 40))
     end
     
