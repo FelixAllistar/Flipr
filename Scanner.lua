@@ -49,6 +49,9 @@ function FLIPR:ScanItems()
         return
     end
 
+    -- Cancel any pending scans before starting new one
+    self:CancelPendingScans()
+
     -- Start new scan
     self.isScanning = true
     self.isPaused = false
@@ -61,13 +64,7 @@ function FLIPR:ScanItems()
     
     if #self.itemIDs == 0 then
         print("No groups selected!")
-        self.isScanning = false
-        if self.scanButton then
-            self.scanButton:SetText("Scan Items")
-        end
-        if self.scanProgressText then
-            self.scanProgressText:SetText("")
-        end
+        self:CancelPendingScans()
         return
     end
 
@@ -104,6 +101,16 @@ function FLIPR:OnThrottleResponse()
 end
 
 function FLIPR:DoubleCheckAuctions(itemID, itemKey, isRetry)
+    -- First check if AH is still open
+    if not AuctionHouseFrame or not AuctionHouseFrame:IsVisible() then
+        print("|cFFFF0000Auction House closed, stopping scan.|r")
+        self.isScanning = false
+        if self.scanButton then
+            self.scanButton:SetText("Scan Items")
+        end
+        return false
+    end
+
     -- Helper function to thoroughly check for auctions
     local function checkResults()
         -- Try commodity results first
@@ -134,17 +141,29 @@ function FLIPR:DoubleCheckAuctions(itemID, itemKey, isRetry)
     local hasResults = checkResults()
     if hasResults == true then
         return true
-    elseif hasResults == "waiting" then
+    elseif hasResults == "waiting" and self.isScanning then
         print("Still waiting for full results...")
-        C_Timer.After(1, function()
-            self:DoubleCheckAuctions(itemID, itemKey, true)
+        -- Store the timer so we can cancel it if needed
+        self.currentCheckTimer = C_Timer.After(1, function()
+            -- Clear the timer reference
+            self.currentCheckTimer = nil
+            -- Only continue if we're still scanning
+            if self.isScanning then
+                self:DoubleCheckAuctions(itemID, itemKey, true)
+            end
         end)
         return "waiting"
-    elseif not isRetry then
+    elseif not isRetry and self.isScanning then
         -- No results found, wait 5s and try one more time
         print("No results found, waiting 5s to double-check...")
-        C_Timer.After(5, function()
-            self:DoubleCheckAuctions(itemID, itemKey, true)
+        -- Store the timer so we can cancel it if needed
+        self.currentCheckTimer = C_Timer.After(5, function()
+            -- Clear the timer reference
+            self.currentCheckTimer = nil
+            -- Only continue if we're still scanning
+            if self.isScanning then
+                self:DoubleCheckAuctions(itemID, itemKey, true)
+            end
         end)
         return "waiting"
     else
@@ -310,7 +329,7 @@ function FLIPR:OnCommoditySearchResults()
         if checkResult == "waiting" then
             return -- Will retry from DoubleCheckAuctions
         elseif not checkResult then
-            print(string.format("|cFFFF0000No auctions found for item: %s|r", GetItemInfo(itemID) or itemID))
+            print(string.format("|cFFFF8000NO AUCTIONS FOUND: %s|r", GetItemInfo(itemID) or itemID))
             self.currentScanIndex = self.currentScanIndex + 1
             C_Timer.After(0.5, function() self:ScanNextItem() end)
             return
@@ -364,10 +383,16 @@ function FLIPR:OnItemSearchResults()
     local numResults = C_AuctionHouse.GetNumItemSearchResults(itemKey)
     
     if not numResults or numResults == 0 then
-        print(string.format("|cFFFF0000No auctions found for item: %s|r", GetItemInfo(itemID) or itemID))
-        self.currentScanIndex = self.currentScanIndex + 1
-        C_Timer.After(0.1, function() self:ScanNextItem() end)
-        return
+        -- Double check before giving up
+        local checkResult = self:DoubleCheckAuctions(itemID, itemKey)
+        if checkResult == "waiting" then
+            return -- Will retry from DoubleCheckAuctions
+        elseif not checkResult then
+            print(string.format("|cFFFF8000NO AUCTIONS FOUND: %s|r", GetItemInfo(itemID) or itemID))
+            self.currentScanIndex = self.currentScanIndex + 1
+            C_Timer.After(0.5, function() self:ScanNextItem() end)
+            return
+        end
     end
 
     local processedResults = {}
@@ -391,7 +416,7 @@ function FLIPR:OnItemSearchResults()
     
     -- Always increment and continue after processing
     self.currentScanIndex = self.currentScanIndex + 1
-    C_Timer.After(0.1, function() self:ScanNextItem() end)
+    C_Timer.After(0.5, function() self:ScanNextItem() end)
 end
 
 function FLIPR:ProcessAuctionResults(results)
@@ -770,5 +795,25 @@ function FLIPR:CreateProfitableItemRow(flipOpportunity, results)
             self.selectedItem = nil
         end
     end)
+end
+
+-- Add a function to cancel any pending timers
+function FLIPR:CancelPendingScans()
+    self.isScanning = false
+    if self.currentCheckTimer then
+        -- Cancel the timer if it exists (note: C_Timer.After can't be cancelled in WoW,
+        -- but setting isScanning to false will prevent the callback from continuing the scan)
+        self.currentCheckTimer = nil
+    end
+    if self.scanButton then
+        self.scanButton:SetText("Scan Items")
+    end
+    if self.scanProgressText then
+        self.scanProgressText:SetText("")
+    end
+end
+
+function FLIPR:OnAuctionHouseClosed()
+    self:CancelPendingScans()
 end
   

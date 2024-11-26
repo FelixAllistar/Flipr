@@ -123,6 +123,7 @@ end
 function FLIPR:OnEnable()
     -- Initialize UI events
     self:RegisterEvent("AUCTION_HOUSE_SHOW", "OnAuctionHouseShow")
+    self:RegisterEvent("AUCTION_HOUSE_CLOSED", "OnAuctionHouseClosed")
     
     -- Initialize scanner
     self.selectedRow = nil
