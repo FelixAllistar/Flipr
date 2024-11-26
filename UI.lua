@@ -292,6 +292,13 @@ function FLIPR:CreateGroupButtons(scrollChild)
     
     -- Function to recalculate total height and positions
     local function UpdateFramePositions()
+        -- Padding constants for different types of spacing
+        local ROOT_GROUP_PADDING = 5        -- Base padding between root groups
+        local ROOT_WITH_CHILDREN_EXTRA = 7  -- Extra padding when root has children
+        local SIBLING_PADDING = 20         -- Normal padding between siblings
+        local ROOT_CHILD_PADDING = 28      -- Padding between root and its first child
+        local CHILD_PARENT_PADDING = 25    -- Padding between non-root parent and child
+        
         local currentY = -10
         
         -- Function to get total height of visible children
@@ -301,7 +308,7 @@ function FLIPR:CreateGroupButtons(scrollChild)
             
             for _, child in ipairs({container:GetChildren()}) do
                 if child:IsShown() then
-                    height = height + 20
+                    height = height + SIBLING_PADDING
                     if child.subgroupContainer and child.subgroupContainer:IsShown() then
                         height = height + GetVisibleHeight(child.subgroupContainer)
                     end
@@ -314,7 +321,8 @@ function FLIPR:CreateGroupButtons(scrollChild)
         -- Function to position a container's children
         local function PositionChildren(container, parentY, depth, isRootChild)
             if not container or not container:IsShown() then return end
-            local y = parentY - (isRootChild and 28 or 25)
+            -- Use appropriate padding based on whether it's a root's child
+            local y = parentY - (isRootChild and ROOT_CHILD_PADDING or CHILD_PARENT_PADDING)
             
             local children = {container:GetChildren()}
             for _, child in ipairs(children) do
@@ -327,7 +335,7 @@ function FLIPR:CreateGroupButtons(scrollChild)
                         y = y - GetVisibleHeight(child.subgroupContainer)
                     end
                     
-                    y = y - 20
+                    y = y - SIBLING_PADDING
                 end
             end
         end
@@ -337,7 +345,7 @@ function FLIPR:CreateGroupButtons(scrollChild)
         for _, frameData in ipairs(masterFrames) do
             frameData.frame:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 5, currentY)
             
-            local groupHeight = 20
+            local groupHeight = SIBLING_PADDING
             local hasVisibleChildren = false
             
             if frameData.frame.subgroupContainer and frameData.frame.subgroupContainer:IsShown() then
@@ -347,15 +355,17 @@ function FLIPR:CreateGroupButtons(scrollChild)
                 hasVisibleChildren = true
             end
             
-            -- Add extra padding if this root group has visible children
-            local padding = hasVisibleChildren and 12 or 5
-            
-            if isFirstRoot then
-                currentY = currentY - (groupHeight + padding + 3)  -- Extra 3px for first root
-                isFirstRoot = false
-            else
-                currentY = currentY - (groupHeight + padding)
+            -- Calculate padding for root groups
+            local rootPadding = ROOT_GROUP_PADDING
+            if hasVisibleChildren then
+                rootPadding = rootPadding + ROOT_WITH_CHILDREN_EXTRA
             end
+            if isFirstRoot then
+                rootPadding = rootPadding + 3  -- Extra padding for first root
+            end
+            
+            currentY = currentY - (groupHeight + rootPadding)
+            isFirstRoot = false
         end
         
         scrollChild:SetHeight(math.max(math.abs(currentY) + 5, 40))
