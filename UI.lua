@@ -645,6 +645,10 @@ function FLIPR:CreateProfitableItemRow(flipOpportunity, results)
     local row = CreateFrame("Button", nil, rowContainer)
     row:SetAllPoints(rowContainer)
     
+    -- Enable mouse interaction and register for click events
+    row:EnableMouse(true)
+    row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    
     -- Default background
     local defaultBg = row:CreateTexture(nil, "BACKGROUND")
     defaultBg:SetAllPoints()
@@ -659,7 +663,7 @@ function FLIPR:CreateProfitableItemRow(flipOpportunity, results)
     row.selectionTexture = selection
 
     -- Item icon
-    local iconSize = ROW_HEIGHT - 2  -- Make it slightly smaller than row height
+    local iconSize = ROW_HEIGHT - 2
     local itemIcon = row:CreateTexture(nil, "OVERLAY")
     itemIcon:SetSize(iconSize, iconSize)
     itemIcon:SetPoint("LEFT", row, "LEFT", 2, 0)
@@ -669,9 +673,56 @@ function FLIPR:CreateProfitableItemRow(flipOpportunity, results)
     nameText:SetPoint("LEFT", itemIcon, "RIGHT", 5, 0)
     local itemID = results[1].itemID
     local item = Item:CreateFromItemID(itemID)
+    
+    -- Make the text interactive
+    row:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
+        GameTooltip:SetHyperlink(item:GetItemLink())
+        GameTooltip:Show()
+    end)
+    
+    row:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
+    
+    -- Handle hyperlink clicks (shift-click to chat)
+    row:SetScript("OnClick", function(self, button)
+        if IsModifiedClick("CHATLINK") then
+            ChatEdit_InsertLink(item:GetItemLink())
+            return
+        end
+        
+        -- Clear previous selection's visual state if it exists
+        if FLIPR.selectedItem and FLIPR.itemRows[FLIPR.selectedItem.itemID] then
+            local prevRow = FLIPR.itemRows[FLIPR.selectedItem.itemID].frame:GetChildren()
+            if prevRow then
+                prevRow.selectionTexture:Hide()
+                prevRow.defaultBg:Show()
+            end
+        end
+        
+        -- Your existing click handler for row selection
+        if FLIPR.expandedItemID == itemID then
+            -- Collapse if clicking same item
+            FLIPR:CollapseDropdown()
+            row.itemData.selected = false
+            row.selectionTexture:Hide()
+            row.defaultBg:Show()
+            FLIPR.selectedItem = nil
+        else
+            -- Collapse previous and expand new
+            FLIPR:CollapseDropdown()
+            FLIPR:ExpandDropdown(itemID)
+            row.itemData.selected = true
+            row.selectionTexture:Show()
+            row.defaultBg:Hide()
+            FLIPR.selectedItem = row.itemData
+        end
+    end)
+
     item:ContinueOnItemLoad(function()
         local itemLink = item:GetItemLink()
-        nameText:SetText(itemLink)  -- This will show a clickable link with proper quality color
+        nameText:SetText(itemLink)
         itemIcon:SetTexture(item:GetItemIcon())
     end)
     
@@ -710,26 +761,6 @@ function FLIPR:CreateProfitableItemRow(flipOpportunity, results)
         allAuctions = results
     }
 
-    -- Click handler for row selection
-    row:SetScript("OnClick", function()
-        if self.expandedItemID == itemID then
-            -- Collapse if clicking same item
-            self:CollapseDropdown()
-            row.itemData.selected = false
-            row.selectionTexture:Hide()
-            row.defaultBg:Show()
-            self.selectedItem = nil
-        else
-            -- Collapse previous and expand new
-            self:CollapseDropdown()
-            self:ExpandDropdown(itemID)
-            row.itemData.selected = true
-            row.selectionTexture:Show()
-            row.defaultBg:Hide()
-            self.selectedItem = row.itemData
-        end
-    end)
-    
     -- Auto-scroll if we're near the bottom
     if self.scrollFrame then
         local scrollBar = self.scrollFrame.ScrollBar
