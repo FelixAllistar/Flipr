@@ -658,14 +658,21 @@ function FLIPR:CreateProfitableItemRow(flipOpportunity, results)
     selection:Hide()
     row.selectionTexture = selection
 
+    -- Item icon
+    local iconSize = ROW_HEIGHT - 2  -- Make it slightly smaller than row height
+    local itemIcon = row:CreateTexture(nil, "OVERLAY")
+    itemIcon:SetSize(iconSize, iconSize)
+    itemIcon:SetPoint("LEFT", row, "LEFT", 2, 0)
+    
     -- Item name (left-aligned)
     local nameText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    nameText:SetPoint("LEFT", row, "LEFT", 5, 0)
+    nameText:SetPoint("LEFT", itemIcon, "RIGHT", 5, 0)
     local itemID = results[1].itemID
     local item = Item:CreateFromItemID(itemID)
     item:ContinueOnItemLoad(function()
         local itemLink = item:GetItemLink()
         nameText:SetText(itemLink)  -- This will show a clickable link with proper quality color
+        itemIcon:SetTexture(item:GetItemIcon())
     end)
     
     -- Price text (center-aligned)
