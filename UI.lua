@@ -661,8 +661,12 @@ function FLIPR:CreateProfitableItemRow(flipOpportunity, results)
     -- Item name (left-aligned)
     local nameText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     nameText:SetPoint("LEFT", row, "LEFT", 5, 0)
-    nameText:SetText(results[1].itemName)
-    nameText:SetWidth(150)  -- Fixed width for name
+    local itemID = results[1].itemID
+    local item = Item:CreateFromItemID(itemID)
+    item:ContinueOnItemLoad(function()
+        local itemLink = item:GetItemLink()
+        nameText:SetText(itemLink)  -- This will show a clickable link with proper quality color
+    end)
     
     -- Price text (center-aligned)
     local priceText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
