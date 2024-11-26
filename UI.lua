@@ -675,6 +675,25 @@ function FLIPR:CreateProfitableItemRow(flipOpportunity, results)
             self.selectedItem = row.itemData
         end
     end)
+    
+    -- Auto-scroll if we're near the bottom
+    if self.scrollFrame then
+        local scrollBar = self.scrollFrame.ScrollBar
+        if scrollBar then
+            local currentScroll = scrollBar:GetValue() or 0
+            local maxScroll = (self.profitableItemCount * ROW_HEIGHT) - self.scrollFrame:GetHeight()
+            
+            -- If we're within 100 pixels of the bottom, or if this is the first item
+            if maxScroll <= 0 or (maxScroll - currentScroll) < 100 then
+                -- Use After to ensure the scroll happens after the frame updates
+                C_Timer.After(0.1, function()
+                    if scrollBar and scrollBar.SetValue then
+                        scrollBar:SetValue(maxScroll)
+                    end
+                end)
+            end
+        end
+    end
 end
 
 function FLIPR:UpdateRowPositions()

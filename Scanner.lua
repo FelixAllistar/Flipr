@@ -224,8 +224,8 @@ function FLIPR:OnThrottleResponse()
 end
 
 function FLIPR:ScanNextItem()
-    -- Check if scan was cancelled
-    if not self.isScanning then
+    -- Check if scan was cancelled or paused
+    if not self.isScanning or self.isPaused then
         return
     end
 
