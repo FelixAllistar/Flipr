@@ -22,6 +22,12 @@ function FLIPR:FormatGoldAndSilver(goldValue)
 end
 
 function FLIPR:ScanItems()
+    -- Check if Auction House is open
+    if not AuctionHouseFrame or not AuctionHouseFrame:IsVisible() then
+        print("|cFFFF0000Error: Please open the Auction House before scanning.|r")
+        return
+    end
+
     -- If paused, resume scanning
     if self.isPaused then
         self.isPaused = false
@@ -93,6 +99,16 @@ function FLIPR:ScanNextItem()
         return
     end
 
+    -- Check if Auction House is still open
+    if not AuctionHouseFrame or not AuctionHouseFrame:IsVisible() then
+        print("|cFFFF0000Error: Auction House was closed. Stopping scan.|r")
+        self.isScanning = false
+        if self.scanButton then
+            self.scanButton:SetText("Scan Items")
+        end
+        return
+    end
+
     -- Continue with normal scanning
     if self.currentScanIndex <= #self.itemIDs then
         local itemID = self.itemIDs[self.currentScanIndex]
@@ -143,10 +159,36 @@ function FLIPR:ScanNextItem()
         -- Debug print commodity status
         if itemInfo.isCommodity then
             print(string.format("|cFF00FFFFItem is a commodity: %s|r", itemData.name))
-            C_AuctionHouse.SendSearchQuery(nil, {}, true, itemID)
+            -- For commodities, use specific commodity search
+            C_AuctionHouse.SendSearchQuery(itemKey, {
+                searchString = "",
+                minLevel = 0,
+                maxLevel = 0,
+                filters = {},
+                itemClassFilters = {},
+                sorts = {},
+                separateOwnerItems = false,
+                exactMatch = false,
+                isFavorite = false,
+                allowFavorites = true,
+                onlyUsable = false
+            }, true)
         else
             print(string.format("|cFFFF00FFItem is NOT a commodity: %s|r", itemData.name))
-            C_AuctionHouse.SendSearchQuery(itemKey, {}, true)
+            -- For regular items, use item search
+            C_AuctionHouse.SendSearchQuery(itemKey, {
+                searchString = "",
+                minLevel = 0,
+                maxLevel = 0,
+                filters = {},
+                itemClassFilters = {},
+                sorts = {},
+                separateOwnerItems = false,
+                exactMatch = false,
+                isFavorite = false,
+                allowFavorites = true,
+                onlyUsable = false
+            }, true)
         end
     else
         -- Scan complete

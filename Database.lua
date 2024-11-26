@@ -56,58 +56,76 @@ function FLIPR:LoadAllItems(groupData)
 end
 
 function FLIPR:LoadGroupData(groupData, groupPath)
+    print("Loading group data for path:", groupPath)
     local items = {}
     local addedItems = {} -- Track which items we've already added
     
-    -- If this is a root group, check if it matches the name
-    if groupData.name == groupPath then
-        -- Load all items from this level and below
-        self:LoadAllItemsFromLevel(groupData, items, addedItems)
-        return items
-    end
-    
-    -- Function to recursively search for matching groups
-    local function searchGroups(currentTable, remainingPath)
-        -- Check if current table's name matches what we want
-        if currentTable.name == remainingPath then
-            self:LoadAllItemsFromLevel(currentTable, items, addedItems)
-            return true
-        end
-        
-        -- Check all subtables
-        for key, value in pairs(currentTable) do
-            if type(value) == "table" and key ~= "items" then
-                if value.name and value.name == remainingPath then
-                    self:LoadAllItemsFromLevel(value, items, addedItems)
-                    return true
-                end
-                if searchGroups(value, remainingPath) then
-                    return true
+    -- Function to recursively collect items from a node and its children
+    local function collectItems(node)
+        -- Add items from this level
+        if node.items then
+            for itemId, itemData in pairs(node.items) do
+                if not addedItems[itemId] then
+                    items[itemId] = itemData
+                    addedItems[itemId] = true
+                    print("  Added item:", itemId, itemData.name)
                 end
             end
         end
-        return false
+        
+        -- Recursively add items from children
+        if type(node) == "table" then
+            for key, value in pairs(node) do
+                if type(value) == "table" and key ~= "items" and key ~= "name" then
+                    collectItems(value)
+                end
+            end
+        end
     end
     
-    -- Try to find the group by its name
-    if not searchGroups(groupData, groupPath) then
-        print("Path not found:", groupPath)
+    -- Split the path into parts
+    local pathParts = {strsplit("/", groupPath)}
+    local currentNode = groupData
+    
+    -- Navigate through the path
+    for i, part in ipairs(pathParts) do
+        local found = false
+        print("Looking for part:", part)
+        
+        -- Handle root level differently
+        if i == 1 then
+            -- We're already at the root node (groupData), just verify the name
+            if currentNode.name == part then
+                found = true
+                print("  Matched root group name:", part)
+            end
+        else
+            -- For subgroups, look for them directly in the current node
+            for key, value in pairs(currentNode) do
+                if type(value) == "table" then
+                    if key ~= "items" and value.name == part then
+                        currentNode = value
+                        found = true
+                        print("  Found subgroup:", part)
+                        break
+                    end
+                end
+            end
+        end
+        
+        if not found then
+            print("  Could not find group:", part)
+            return {}
+        end
     end
+    
+    -- Found the group, collect all items from it and its children
+    print("Found target group, collecting items")
+    collectItems(currentNode)
     
     local count = 0
     for _ in pairs(items) do count = count + 1 end
     print(string.format("Found %d unique items in group: %s", count, groupPath))
-    
-    -- Print first few items for debugging
-    local printed = 0
-    for itemId, itemData in pairs(items) do
-        if printed < 3 then
-            print(string.format("  Sample item: %d - %s", itemId, itemData.name))
-            printed = printed + 1
-        else
-            break
-        end
-    end
     
     return items
 end
@@ -145,6 +163,7 @@ end
 
 function FLIPR:UpdateScanItems()
     self.itemIDs = {}
+    self.itemDB = {}  -- Reset itemDB as well
     local addedItems = {} -- Track which items we've already added
     
     for groupPath, enabled in pairs(self.db.enabledGroups) do
@@ -157,6 +176,7 @@ function FLIPR:UpdateScanItems()
                     if not addedItems[itemID] then
                         count = count + 1
                         table.insert(self.itemIDs, itemID)
+                        self.itemDB[itemID] = itemData  -- Add to itemDB as well
                         addedItems[itemID] = true
                         print(string.format("Adding item to scan list: %d - %s from group %s", 
                             itemID, itemData.name, groupPath))
