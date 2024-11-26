@@ -28,7 +28,6 @@ function FLIPR:CancelScan()
     -- Reset scan button text
     if self.scanButton then
         self.scanButton:SetText("Scan Items")
-        self.scanButton.buttonText:SetText("Scan Items")
     end
     
     -- Clear all rows
