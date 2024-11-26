@@ -10,6 +10,12 @@ FLIPR.scanButton = nil
 FLIPR.failedItems = {}
 FLIPR.maxRetries = 3
 FLIPR.retryDelay = 2 -- seconds
+FLIPR.retryState = {
+    itemID = nil,
+    retryCount = 0,
+    isRetrying = false
+}
+FLIPR.retryTimer = nil
 
 function FLIPR:FormatGoldAndSilver(goldValue)
     local gold = math.floor(goldValue)
@@ -21,31 +27,144 @@ function FLIPR:FormatGoldAndSilver(goldValue)
     end
 end
 
-function FLIPR:ScanItems()
-    -- Check if Auction House is open
-    if not AuctionHouseFrame or not AuctionHouseFrame:IsVisible() then
-        print("|cFFFF0000Error: Please open the Auction House before scanning.|r")
-        return
-    end
+function FLIPR:StartRetryCheck(itemID, itemKey)
+    -- Clear any existing retry timer
+    self.retryTimer = nil
+    
+    -- Initialize retry state
+    self.retryState = {
+        itemID = itemID,
+        retryCount = 0,
+        isRetrying = true
+    }
+    
+    -- Start retry timer
+    self.retryTimer = C_Timer.NewTicker(1, function()
+        -- Check pause state first
+        if self.isPaused or self.shouldPauseAfterItem then
+            print("|cFFFF0000PAUSED|r")
+            self.isPaused = true
+            self.isScanning = false
+            self.shouldPauseAfterItem = false
+            if self.scanButton then
+                self.scanButton:SetText("Resume Scan")
+            end
+            -- Cancel the timer
+            if self.retryTimer then
+                self.retryTimer:Cancel()
+                self.retryTimer = nil
+            end
+            return
+        end
+        
+        -- Check if AH is still open
+        if not AuctionHouseFrame or not AuctionHouseFrame:IsVisible() then
+            print("|cFFFF0000Auction House closed, stopping scan.|r")
+            self.isScanning = false
+            if self.scanButton then
+                self.scanButton:SetText("Scan Items")
+            end
+            -- Cancel the timer
+            if self.retryTimer then
+                self.retryTimer:Cancel()
+                self.retryTimer = nil
+            end
+            return
+        end
+        
+        -- Check results
+        local function checkResults()
+            if C_AuctionHouse.HasFullCommoditySearchResults and C_AuctionHouse.HasFullCommoditySearchResults(itemID) then
+                local commodityResults = C_AuctionHouse.GetNumCommoditySearchResults(itemID)
+                if commodityResults and commodityResults > 0 then
+                    return true
+                end
+            elseif C_AuctionHouse.HasFullCommoditySearchResults then
+                return "waiting"
+            end
+            
+            if itemKey then
+                local itemResults = C_AuctionHouse.GetNumItemSearchResults(itemKey)
+                if itemResults and itemResults > 0 then
+                    return true
+                end
+            end
+            
+            return false
+        end
+        
+        local hasResults = checkResults()
+        if hasResults == true then
+            -- Found results, process them
+            if self.retryTimer then
+                self.retryTimer:Cancel()
+                self.retryTimer = nil
+            end
+            if itemKey then
+                self:OnItemSearchResults()
+            else
+                self:OnCommoditySearchResults()
+            end
+        elseif hasResults == "waiting" and self.retryState.retryCount < 2 then
+            -- Still waiting, increment retry count
+            self.retryState.retryCount = self.retryState.retryCount + 1
+            print(string.format("Still waiting for results for %s - Retry %d/3", GetItemInfo(itemID) or itemID, self.retryState.retryCount))
+        else
+            -- No results or max retries reached
+            if self.retryTimer then
+                self.retryTimer:Cancel()
+                self.retryTimer = nil
+            end
+            print(string.format("|cFFFF8000NO AUCTIONS FOUND: %s|r", GetItemInfo(itemID) or itemID))
+            if self.isScanning and not self.isPaused then
+                self.currentScanIndex = self.currentScanIndex + 1
+                C_Timer.After(0.5, function()
+                    if self.isScanning and not self.isPaused then
+                        self:ScanNextItem()
+                    end
+                end)
+            end
+        end
+    end)
+end
 
-    -- If paused, resume scanning
-    if self.isPaused then
+function FLIPR:DoubleCheckAuctions(itemID, itemKey, isRetry)
+    -- If this is the first check, start the retry process
+    if not isRetry then
+        self:StartRetryCheck(itemID, itemKey)
+        return "waiting"
+    end
+    return false
+end
+
+function FLIPR:ScanItems()
+    -- If we're already scanning and not paused, set flag to pause after current item
+    if self.isScanning and not self.isPaused then
+        print("|cFFFF0000PAUSED|r")
+        self.shouldPauseAfterItem = true
+        self.isPaused = true  -- Set this immediately to stop event processing
+        -- Update UI immediately
+        if self.scanButton then
+            self.scanButton:SetText("Resume Scan")
+        end
+        return
+    -- If we're paused, resume scanning
+    elseif self.isPaused then
+        print("|cFF00FF00RESUMED|r")
+        self.shouldPauseAfterItem = false
         self.isPaused = false
-        self.isScanning = true
+        -- Update UI immediately
         if self.scanButton then
             self.scanButton:SetText("Pause Scan")
         end
+        -- Resume scanning from where we left off
         self:ScanNextItem()
         return
     end
 
-    -- If scanning, pause it
-    if self.isScanning then
-        self.isPaused = true
-        self.isScanning = false
-        if self.scanButton then
-            self.scanButton:SetText("Resume Scan")
-        end
+    -- Check if Auction House is open
+    if not AuctionHouseFrame or not AuctionHouseFrame:IsVisible() then
+        print("|cFFFF0000Error: Please open the Auction House before scanning.|r")
         return
     end
 
@@ -55,6 +174,7 @@ function FLIPR:ScanItems()
     -- Start new scan
     self.isScanning = true
     self.isPaused = false
+    self.shouldPauseAfterItem = false  -- Initialize the flag
     if self.scanButton then
         self.scanButton:SetText("Pause Scan")
     end
@@ -100,88 +220,6 @@ function FLIPR:OnThrottleResponse()
         C_Timer.After(0.5, function()
             self:ScanNextItem()  -- Continue with the current item
         end)
-    end
-end
-
-function FLIPR:DoubleCheckAuctions(itemID, itemKey, isRetry)
-    -- First check if AH is still open
-    if not AuctionHouseFrame or not AuctionHouseFrame:IsVisible() then
-        print("|cFFFF0000Auction House closed, stopping scan.|r")
-        self.isScanning = false
-        if self.scanButton then
-            self.scanButton:SetText("Scan Items")
-        end
-        return false
-    end
-
-    -- Helper function to thoroughly check for auctions
-    local function checkResults()
-        -- For commodities
-        if C_AuctionHouse.HasFullCommoditySearchResults and C_AuctionHouse.HasFullCommoditySearchResults(itemID) then
-            local commodityResults = C_AuctionHouse.GetNumCommoditySearchResults(itemID)
-            if commodityResults and commodityResults > 0 then
-                return true
-            end
-        elseif C_AuctionHouse.HasFullCommoditySearchResults then
-            -- Still waiting for full commodity results
-            return "waiting"
-        end
-
-        -- For regular items
-        if itemKey then
-            local itemResults = C_AuctionHouse.GetNumItemSearchResults(itemKey)
-            if itemResults and itemResults > 0 then
-                return true
-            end
-        end
-
-        -- If we get here, we either have full results with no auctions,
-        -- or we're dealing with a regular item that has no results
-        return false
-    end
-
-    local hasResults = checkResults()
-    if hasResults == true then
-        return true
-    elseif hasResults == "waiting" and self.isScanning then
-        if not isRetry then
-            print("Still waiting for full results...")
-            -- Store the timer so we can cancel it if needed
-            self.currentCheckTimer = C_Timer.After(1, function()
-                -- Clear the timer reference
-                self.currentCheckTimer = nil
-                -- Only continue if we're still scanning
-                if self.isScanning then
-                    self:DoubleCheckAuctions(itemID, itemKey, true)
-                end
-            end)
-        else
-            -- If we're retrying and still waiting, give it one more second
-            self.currentCheckTimer = C_Timer.After(1, function()
-                self.currentCheckTimer = nil
-                if self.isScanning then
-                    -- Force a decision after this retry
-                    local finalCheck = checkResults()
-                    if finalCheck == true then
-                        -- Found results, continue with normal flow
-                        if itemKey then
-                            self:OnItemSearchResults()
-                        else
-                            self:OnCommoditySearchResults()
-                        end
-                    else
-                        -- No results after waiting, move on
-                        print(string.format("|cFFFF8000NO AUCTIONS FOUND: %s|r", GetItemInfo(itemID) or itemID))
-                        self.currentScanIndex = self.currentScanIndex + 1
-                        C_Timer.After(0.5, function() self:ScanNextItem() end)
-                    end
-                end
-            end)
-        end
-        return "waiting"
-    else
-        -- No results and not waiting for more
-        return false
     end
 end
 
@@ -336,6 +374,11 @@ function FLIPR:ScanNextItem()
 end
 
 function FLIPR:OnCommoditySearchResults()
+    -- Don't process events if we're paused
+    if self.isPaused or self.shouldPauseAfterItem then
+        return
+    end
+
     local itemID = self.itemIDs[self.currentScanIndex]
     if not itemID then return end
     
@@ -424,12 +467,28 @@ function FLIPR:OnCommoditySearchResults()
         self:ProcessAuctionResults(processedResults)
     end
     
-    -- Move to next item
+    -- Check if we should pause after this item
+    if self.shouldPauseAfterItem then
+        self.isPaused = true
+        self.isScanning = false
+        self.shouldPauseAfterItem = false  -- Clear the flag
+        if self.scanButton then
+            self.scanButton:SetText("Resume Scan")
+        end
+        return
+    end
+    
+    -- Move to next item if not pausing
     self.currentScanIndex = self.currentScanIndex + 1
     C_Timer.After(0.5, function() self:ScanNextItem() end)
 end
 
 function FLIPR:OnItemSearchResults()
+    -- Don't process events if we're paused
+    if self.isPaused or self.shouldPauseAfterItem then
+        return
+    end
+
     local itemID = self.itemIDs[self.currentScanIndex]
     if not itemID then return end
     
@@ -468,7 +527,18 @@ function FLIPR:OnItemSearchResults()
         self:ProcessAuctionResults(processedResults)
     end
     
-    -- Always increment and continue after processing
+    -- Check if we should pause after this item
+    if self.shouldPauseAfterItem then
+        self.isPaused = true
+        self.isScanning = false
+        self.shouldPauseAfterItem = false  -- Clear the flag
+        if self.scanButton then
+            self.scanButton:SetText("Resume Scan")
+        end
+        return
+    end
+    
+    -- Move to next item if not pausing
     self.currentScanIndex = self.currentScanIndex + 1
     C_Timer.After(0.5, function() self:ScanNextItem() end)
 end
@@ -854,10 +924,10 @@ end
 -- Add a function to cancel any pending timers
 function FLIPR:CancelPendingScans()
     self.isScanning = false
-    if self.currentCheckTimer then
-        -- Cancel the timer if it exists (note: C_Timer.After can't be cancelled in WoW,
-        -- but setting isScanning to false will prevent the callback from continuing the scan)
-        self.currentCheckTimer = nil
+    -- Cancel retry timer if it exists
+    if self.retryTimer then
+        self.retryTimer:Cancel()
+        self.retryTimer = nil
     end
     if self.scanButton then
         self.scanButton:SetText("Scan Items")
