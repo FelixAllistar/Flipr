@@ -669,29 +669,36 @@ function FLIPR:CreateProfitableItemRow(flipOpportunity, results)
     itemIcon:SetPoint("LEFT", row, "LEFT", 2, 0)
     
     -- Item name (left-aligned)
-    local nameText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    nameText:SetPoint("LEFT", itemIcon, "RIGHT", 5, 0)
+    local itemLinkButton = CreateFrame("Button", nil, row)
+    itemLinkButton:SetSize(150, ROW_HEIGHT)  -- Fixed width for item name
+    itemLinkButton:SetPoint("LEFT", itemIcon, "RIGHT", 5, 0)
+    itemLinkButton:EnableMouse(true)
+    itemLinkButton:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    
+    local nameText = itemLinkButton:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    nameText:SetAllPoints()
     local itemID = results[1].itemID
     local item = Item:CreateFromItemID(itemID)
     
     -- Make the text interactive
-    row:SetScript("OnEnter", function(self)
+    itemLinkButton:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
         GameTooltip:SetHyperlink(item:GetItemLink())
         GameTooltip:Show()
     end)
     
-    row:SetScript("OnLeave", function()
+    itemLinkButton:SetScript("OnLeave", function()
         GameTooltip:Hide()
     end)
     
-    -- Handle hyperlink clicks (shift-click to chat)
-    row:SetScript("OnClick", function(self, button)
+    -- Separate click handlers for item link and row
+    itemLinkButton:SetScript("OnClick", function(self, button)
         if IsModifiedClick("CHATLINK") then
             ChatEdit_InsertLink(item:GetItemLink())
             return
         end
         
+        -- Handle row expansion just like the main row click
         -- Clear previous selection's visual state if it exists
         if FLIPR.selectedItem and FLIPR.itemRows[FLIPR.selectedItem.itemID] then
             local prevRow = FLIPR.itemRows[FLIPR.selectedItem.itemID].frame:GetChildren()
@@ -701,7 +708,35 @@ function FLIPR:CreateProfitableItemRow(flipOpportunity, results)
             end
         end
         
-        -- Your existing click handler for row selection
+        if FLIPR.expandedItemID == itemID then
+            -- Collapse if clicking same item
+            FLIPR:CollapseDropdown()
+            row.itemData.selected = false
+            row.selectionTexture:Hide()
+            row.defaultBg:Show()
+            FLIPR.selectedItem = nil
+        else
+            -- Collapse previous and expand new
+            FLIPR:CollapseDropdown()
+            FLIPR:ExpandDropdown(itemID)
+            row.itemData.selected = true
+            row.selectionTexture:Show()
+            row.defaultBg:Hide()
+            FLIPR.selectedItem = row.itemData
+        end
+    end)
+
+    -- Restore row click handler for selection
+    row:SetScript("OnClick", function(self, button)
+        -- Clear previous selection's visual state if it exists
+        if FLIPR.selectedItem and FLIPR.itemRows[FLIPR.selectedItem.itemID] then
+            local prevRow = FLIPR.itemRows[FLIPR.selectedItem.itemID].frame:GetChildren()
+            if prevRow then
+                prevRow.selectionTexture:Hide()
+                prevRow.defaultBg:Show()
+            end
+        end
+        
         if FLIPR.expandedItemID == itemID then
             -- Collapse if clicking same item
             FLIPR:CollapseDropdown()
@@ -783,13 +818,15 @@ end
 
 function FLIPR:UpdateRowPositions()
     local expandedIndex = self.expandedItemID and self.itemRows[self.expandedItemID].rowIndex or 0
+    local expandedRowData = self.expandedItemID and self.itemRows[self.expandedItemID]
+    local dropdownHeight = expandedRowData and (math.min(#expandedRowData.results, MAX_DROPDOWN_ROWS) * ROW_HEIGHT) or 0
     
     for id, rowData in pairs(self.itemRows) do
         local yOffset = (rowData.rowIndex - 1) * ROW_HEIGHT
         
         -- If this row is below an expanded row, add dropdown height
         if expandedIndex > 0 and rowData.rowIndex > expandedIndex then
-            yOffset = yOffset + DROPDOWN_TOTAL_HEIGHT
+            yOffset = yOffset + dropdownHeight
         end
         
         rowData.frame:ClearAllPoints()
@@ -800,7 +837,7 @@ function FLIPR:UpdateRowPositions()
     -- Update scroll child height
     local totalHeight = (self.profitableItemCount * ROW_HEIGHT)
     if self.expandedItemID then
-        totalHeight = totalHeight + DROPDOWN_TOTAL_HEIGHT
+        totalHeight = totalHeight + dropdownHeight
     end
     self.scrollChild:SetHeight(math.max(1, totalHeight))
 end
@@ -823,11 +860,14 @@ function FLIPR:ExpandDropdown(itemID)
     local rowData = self.itemRows[itemID]
     if not rowData then return end
     
+    -- Get actual number of auctions (capped at MAX_DROPDOWN_ROWS)
+    local numAuctions = math.min(#rowData.results, MAX_DROPDOWN_ROWS)
+    
     -- Create dropdown
     local dropdown = CreateFrame("Frame", nil, rowData.frame)
     dropdown:SetPoint("TOPLEFT", rowData.frame, "BOTTOMLEFT", 0, 0)
     dropdown:SetPoint("TOPRIGHT", rowData.frame, "BOTTOMRIGHT", 0, 0)
-    dropdown:SetHeight(MAX_DROPDOWN_ROWS * ROW_HEIGHT)
+    dropdown:SetHeight(numAuctions * ROW_HEIGHT)
     
     -- Create child auction rows
     self:CreateDropdownRows(dropdown, rowData.results)
