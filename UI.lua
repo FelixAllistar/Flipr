@@ -214,19 +214,10 @@ function FLIPR:CreateGroupButtons(parent)
     
     -- Build group structure
     self.groupStructure = {}
-    print("Available groups:")
-    for tableName, groupData in pairs(self.availableGroups) do
-        print("  Found table:", tableName)
-        print("  Group data name:", groupData.name)
-        print("  Keys in group data:")
-        for k, v in pairs(groupData) do
-            if type(v) == "table" then
-                print("    -", k, "(table)")
-            else
-                print("    -", k, "=", v)
-            end
-        end
-        self.groupStructure[tableName] = self:BuildGroupStructure(groupData)
+    print("Building group structure from available groups:")
+    for groupName, groupData in pairs(self.availableGroups) do
+        print(string.format("Processing root group: %s", groupName))
+        self.groupStructure[groupName] = self:BuildGroupStructure(groupData)
     end
     
     -- Create checkboxes
@@ -234,66 +225,114 @@ function FLIPR:CreateGroupButtons(parent)
     print("=== CreateGroupButtons END ===")
 end
 
+function FLIPR:GetAvailableGroups()
+    print("=== GetAvailableGroups START ===")
+    local groups = {}
+    
+    -- Check if FliprDB exists
+    if not FliprDB then
+        print("ERROR: FliprDB is nil!")
+        return groups
+    end
+    
+    if not FliprDB.groups then
+        print("ERROR: FliprDB.groups is nil!")
+        return groups
+    end
+    
+    print("Found groups in FliprDB:")
+    for groupName, groupData in pairs(FliprDB.groups) do
+        print(string.format("  Group: %s", groupName))
+        if groupData.children then
+            for childName, _ in pairs(groupData.children) do
+                print(string.format("    - Child: %s", childName))
+            end
+        end
+    end
+    
+    print("=== GetAvailableGroups END ===")
+    return FliprDB.groups
+end
+
+function FLIPR:GetItemsFromGroup(groupData, path)
+    local items = {}
+    
+    -- Helper function to recursively collect items
+    local function collectItems(node)
+        -- Add items from current node
+        if node.items then
+            for itemId, itemData in pairs(node.items) do
+                items[itemId] = itemData
+            end
+        end
+        
+        -- Recursively process children
+        if node.children then
+            for _, childNode in pairs(node.children) do
+                collectItems(childNode)
+            end
+        end
+    end
+    
+    -- If no path specified, collect all items recursively
+    if not path then
+        collectItems(groupData)
+        return items
+    end
+    
+    -- Navigate to specific path
+    local currentNode = groupData
+    local pathParts = {strsplit("/", path)}
+    
+    for _, part in ipairs(pathParts) do
+        if currentNode.children and currentNode.children[part] then
+            currentNode = currentNode.children[part]
+        else
+            return {}  -- Path not found
+        end
+    end
+    
+    -- Collect items from the specified path
+    collectItems(currentNode)
+    return items
+end
+
 function FLIPR:BuildGroupStructure(groupData)
-    print("Building structure for:", groupData.name)
+    if not groupData then
+        print("ERROR: Received nil groupData in BuildGroupStructure")
+        return nil
+    end
+    
+    print(string.format("Building structure for: %s", groupData.name or "unnamed group"))
     local structure = {
         name = groupData.name,
         children = {},
         items = groupData.items or {}
     }
     
-    -- Process each subgroup
-    for key, value in pairs(groupData) do
-        -- Skip special keys and non-table values
-        if type(value) == "table" and key ~= "items" and key ~= "name" then
-            -- If it has a name field, it's a subgroup
-            if value.name then
-                print("  Found subgroup:", value.name)
-                -- Store using the actual name as the key
-                structure.children[value.name] = {
-                    name = value.name,
-                    children = {},
-                    items = value.items or {}
-                }
-                -- Process children recursively
-                for subKey, subValue in pairs(value) do
-                    if type(subValue) == "table" and subKey ~= "items" and subKey ~= "name" then
-                        if subValue.name then
-                            structure.children[value.name].children[subValue.name] = self:BuildGroupStructure(subValue)
-                        end
-                    end
-                end
-            end
-        end
-    end
-    
-    -- Debug print children
-    if next(structure.children) then
-        print("  Children for", groupData.name .. ":")
-        for childName, childData in pairs(structure.children) do
-            print("    -", childName)
-            if next(childData.children) then
-                for grandChildName, _ in pairs(childData.children) do
-                    print("      *", grandChildName)
-                end
-            end
+    -- Process children
+    if groupData.children then
+        print("  Processing children:")
+        for childName, childData in pairs(groupData.children) do
+            print(string.format("    Child: %s", childName))
+            structure.children[childName] = self:BuildGroupStructure(childData)
         end
     else
-        print("  No children for", groupData.name)
+        print("  No children found")
     end
     
     return structure
 end
 
 function FLIPR:RefreshGroupList()
+    print("=== RefreshGroupList START ===")
     if not self.groupFrame then 
-        print("No group frame found!")
+        print("ERROR: No group frame found!")
         return 
     end
     
-    print("Refreshing group list...")
-    
     -- Clear existing checkboxes
+    print("Clearing existing checkboxes")
     for _, child in pairs({self.groupFrame:GetChildren()}) do
         child:Hide()
         child:SetParent(nil)
@@ -302,55 +341,59 @@ function FLIPR:RefreshGroupList()
     local yOffset = -10
     
     -- Helper function to add groups recursively
-    local function addGroups(node, prefix, level, tableName)
+    local function addGroups(node, prefix, level)
         if not node then 
-            print("Nil node encountered")
+            print("ERROR: Nil node encountered")
             return yOffset 
         end
+        
+        print(string.format("Processing node: %s (level %d)", node.name or "unnamed", level))
         
         -- Create checkbox for current node if it has a name
         if node.name then
             local fullPath = prefix and (prefix .. "/" .. node.name) or node.name
             local displayName = node.name
             
-            print(string.format("Creating checkbox for '%s' at level %d", displayName, level))
-            local container, expandButton = self:CreateGroupCheckbox(self.groupFrame, displayName, fullPath, tableName, level)
+            print(string.format("Creating checkbox for '%s' at level %d (path: %s)", displayName, level, fullPath))
+            local container, expandButton = self:CreateGroupCheckbox(self.groupFrame, displayName, fullPath, level)
             container:SetPoint("TOPLEFT", self.groupFrame, "TOPLEFT", 0, yOffset)
-            
-            if expandButton then
-                print("  Created expand button for", displayName)
-            end
             
             -- Update yOffset for next item
             yOffset = yOffset - 25
             
             -- If expanded and has children, add them
-            if self.db.expandedGroups[fullPath] and next(node.children) then
-                print("  Group is expanded:", fullPath)
+            if self.db.expandedGroups[fullPath] and node.children and next(node.children) then
+                print(string.format("  Expanding children of %s", fullPath))
                 for childName, childNode in pairs(node.children) do
-                    yOffset = addGroups(childNode, fullPath, level + 1, tableName)
+                    print(string.format("    Processing child: %s", childName))
+                    yOffset = addGroups(childNode, fullPath, level + 1)
                 end
             else
-                print("  Group is collapsed:", fullPath)
+                print(string.format("  Group %s is collapsed or has no children", fullPath))
             end
+        else
+            print("WARNING: Node has no name, skipping")
         end
         
         return yOffset
     end
     
-    -- Add groups for each table
+    -- Add groups from saved variables
     print("Processing available groups:")
-    for tableName, structure in pairs(self.groupStructure) do
-        print("Processing table:", tableName)
-        yOffset = addGroups(structure, nil, 0, tableName)
+    for groupName, structure in pairs(self.groupStructure) do
+        print(string.format("Processing root group: %s", groupName))
+        yOffset = addGroups(structure, nil, 0)
     end
     
     -- Update parent frame height
-    self.groupFrame:SetHeight(math.abs(yOffset) + 10)
+    local newHeight = math.abs(yOffset) + 10
+    print(string.format("Setting group frame height to: %d", newHeight))
+    self.groupFrame:SetHeight(newHeight)
+    print("=== RefreshGroupList END ===")
 end
 
-function FLIPR:CreateGroupCheckbox(parent, text, groupPath, tableName, level)
-    print("Creating checkbox for:", text, "path:", groupPath)
+function FLIPR:CreateGroupCheckbox(parent, text, groupPath, level)
+    print(string.format("Creating checkbox for: %s (path: %s, level: %d)", text, groupPath, level))
     
     -- Create container frame for checkbox and expand button
     local container = CreateFrame("Frame", nil, parent)
@@ -358,40 +401,46 @@ function FLIPR:CreateGroupCheckbox(parent, text, groupPath, tableName, level)
     
     -- Create expand button first if needed
     local expandButton
-    local structure = self.groupStructure[tableName]
-    if not structure then
-        print("  No structure found for table:", tableName)
-        return container
-    end
     
     -- Find the correct node in the structure
-    local node = structure
-    if groupPath ~= structure.name then
-        local pathParts = {strsplit("/", groupPath)}
-        print("  Looking for path parts:", table.concat(pathParts, ", "))
+    local function findNode(path)
+        if not path then return nil end
         
-        -- Skip the first part if it matches the root
-        local startIndex = 1
-        if pathParts[1] == structure.name then
-            startIndex = 2
-        end
+        local parts = {strsplit("/", path)}
+        local currentNode = nil
         
-        -- Navigate through children using names
-        for i = startIndex, #pathParts do
-            if node and node.children and node.children[pathParts[i]] then
-                node = node.children[pathParts[i]]
-                print("    Found child:", pathParts[i])
-            else
-                print("    Could not find child:", pathParts[i])
-                node = nil
+        -- Start from root groups
+        for groupName, groupData in pairs(self.availableGroups) do
+            if groupData.name == parts[1] then
+                currentNode = groupData
                 break
             end
         end
+        
+        if not currentNode then
+            print(string.format("ERROR: Could not find root group: %s", parts[1]))
+            return nil
+        end
+        
+        -- Navigate through children
+        for i = 2, #parts do
+            if currentNode.children and currentNode.children[parts[i]] then
+                currentNode = currentNode.children[parts[i]]
+            else
+                print(string.format("ERROR: Could not find child: %s", parts[i]))
+                return nil
+            end
+        end
+        
+        return currentNode
     end
+    
+    local node = findNode(groupPath)
+    print(string.format("Found node for path %s: %s", groupPath, node and "yes" or "no"))
     
     -- Create expand button if the node has children
     if node and node.children and next(node.children) then
-        print("  Creating expand button for", text, "(has children)")
+        print(string.format("  Creating expand button for %s (has children)", text))
         expandButton = CreateFrame("Button", nil, container)
         expandButton:SetSize(16, 16)
         expandButton:SetPoint("LEFT", container, "LEFT", 20 * level, 0)
@@ -401,7 +450,7 @@ function FLIPR:CreateGroupCheckbox(parent, text, groupPath, tableName, level)
         expandButton:SetNormalTexture(isExpanded and "Interface\\Buttons\\UI-MinusButton-Up" or "Interface\\Buttons\\UI-PlusButton-Up")
         
         expandButton:SetScript("OnClick", function()
-            print("Expand button clicked for:", groupPath)
+            print(string.format("Expand button clicked for: %s", groupPath))
             self.db.expandedGroups[groupPath] = not self.db.expandedGroups[groupPath]
             self:RefreshGroupList()
         end)
@@ -422,14 +471,16 @@ function FLIPR:CreateGroupCheckbox(parent, text, groupPath, tableName, level)
     -- Checkbox click handler
     checkbox:SetScript("OnClick", function()
         local checked = checkbox:GetChecked()
-        print("Checkbox clicked:", groupPath, checked)
-        self:ToggleGroupState(tableName, groupPath, checked)
+        print(string.format("Checkbox clicked: %s = %s", groupPath, checked and "true" or "false"))
+        self:ToggleGroupState(groupPath, checked)
     end)
     
     return container, expandButton
 end
 
-function FLIPR:ToggleGroupState(tableName, groupPath, checked)
+function FLIPR:ToggleGroupState(groupPath, checked)
+    print(string.format("Toggling group: %s to %s", groupPath, checked and "enabled" or "disabled"))
+    
     -- Update enabled state
     self.db.enabledGroups[groupPath] = checked
     
@@ -642,11 +693,61 @@ function FLIPR:CreateTitleButtons(titleSection)
     cancelButton:SetScript("OnClick", function() self:CancelScan() end)
 end
 
+function FLIPR:HandleItemSelection(itemID, row)
+    -- If clicking currently selected item, deselect everything
+    if self.selectedItem and self.selectedItem.itemID == itemID then
+        -- Clean up current selection
+        row.selectionTexture:Hide()
+        row.defaultBg:Show()
+        
+        -- Clean up last selection if it exists
+        if self.lastSelectedItem and self.lastSelectedItem.itemID ~= itemID then
+            local lastRowData = self.itemRows[self.lastSelectedItem.itemID]
+            if lastRowData then
+                local lastRow = lastRowData.frame:GetChildren()
+                if lastRow then
+                    lastRow.selectionTexture:Hide()
+                    lastRow.defaultBg:Show()
+                end
+            end
+        end
+        
+        self:CollapseDropdown()
+        self.lastSelectedItem = nil
+        self.selectedItem = nil
+        return
+    end
+    
+    -- Store current selection as last selection before changing
+    if self.selectedItem then
+        self.lastSelectedItem = self.selectedItem
+        -- Clean up last selection's visuals
+        local lastRowData = self.itemRows[self.lastSelectedItem.itemID]
+        if lastRowData then
+            local lastRow = lastRowData.frame:GetChildren()
+            if lastRow then
+                lastRow.selectionTexture:Hide()
+                lastRow.defaultBg:Show()
+            end
+        end
+    end
+    
+    -- Collapse any existing dropdown
+    self:CollapseDropdown()
+    
+    -- Set up new selection
+    row.selectionTexture:Show()
+    row.defaultBg:Hide()
+    self.selectedItem = row.itemData
+    self:ExpandDropdown(itemID)
+end
+
 function FLIPR:CreateProfitableItemRow(flipOpportunity, results)
     -- Play sound for profitable item
     PlaySoundFile("Interface\\AddOns\\FLIPR\\sounds\\VO_GoblinVenM_Greeting06.ogg", "Master")
     
-    local itemID = results[1].itemID
+    local itemID = tonumber(results[1].itemID)
+    print("Creating row for itemID:", itemID)
     
     -- Create row container
     local rowContainer = CreateFrame("Frame", nil, self.scrollChild)
@@ -656,17 +757,6 @@ function FLIPR:CreateProfitableItemRow(flipOpportunity, results)
     self.profitableItemCount = (self.profitableItemCount or 0) + 1
     rowContainer.rowIndex = self.profitableItemCount
     
-    -- Store in our itemRows table
-    self.itemRows[itemID] = {
-        frame = rowContainer,
-        rowIndex = self.profitableItemCount,
-        results = results,
-        flipOpportunity = flipOpportunity
-    }
-    
-    -- Initial position
-    self:UpdateRowPositions()
-
     -- Create the main row button
     local row = CreateFrame("Button", nil, rowContainer)
     row:SetAllPoints(rowContainer)
@@ -703,8 +793,34 @@ function FLIPR:CreateProfitableItemRow(flipOpportunity, results)
     
     local nameText = itemLinkButton:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     nameText:SetAllPoints()
-    local itemID = results[1].itemID
+    
+    -- Store item data with the row
+    row.itemData = {
+        itemID = itemID,
+        minPrice = results[1].minPrice,
+        totalQuantity = results[1].totalQuantity,
+        auctionID = results[1].auctionID,
+        isCommodity = results[1].isCommodity,
+        selected = false,
+        allAuctions = results
+    }
+    
+    -- Store in our itemRows table
+    self.itemRows[itemID] = {
+        frame = rowContainer,
+        row = row,
+        rowIndex = self.profitableItemCount,
+        results = results,
+        flipOpportunity = flipOpportunity
+    }
+    
+    -- Create item object
     local item = Item:CreateFromItemID(itemID)
+    item:ContinueOnItemLoad(function()
+        local itemLink = item:GetItemLink()
+        nameText:SetText(itemLink)
+        itemIcon:SetTexture(item:GetItemIcon())
+    end)
     
     -- Make the text interactive
     itemLinkButton:SetScript("OnEnter", function(self)
@@ -717,75 +833,52 @@ function FLIPR:CreateProfitableItemRow(flipOpportunity, results)
         GameTooltip:Hide()
     end)
     
-    -- Separate click handlers for item link and row
+    -- Click handlers
+    local function handleClick()
+        print("Row clicked for itemID:", itemID)
+        print("Current selectedItem:", FLIPR.selectedItem and FLIPR.selectedItem.itemID)
+        print("Current expandedItemID:", FLIPR.expandedItemID)
+        
+        -- Clear previous selection's visual state if it exists
+        if FLIPR.selectedItem and FLIPR.itemRows[FLIPR.selectedItem.itemID] then
+            local prevRowData = FLIPR.itemRows[FLIPR.selectedItem.itemID]
+            if prevRowData.row then
+                print("Clearing previous selection:", FLIPR.selectedItem.itemID)
+                prevRowData.row.selectionTexture:Hide()
+                prevRowData.row.defaultBg:Show()
+            end
+        end
+        
+        if FLIPR.expandedItemID == itemID then
+            -- Collapse if clicking same item
+            print("Collapsing dropdown for:", itemID)
+            FLIPR:CollapseDropdown()
+            row.itemData.selected = false
+            row.selectionTexture:Hide()
+            row.defaultBg:Show()
+            FLIPR.selectedItem = nil
+        else
+            -- Collapse previous and expand new
+            print("Expanding dropdown for:", itemID)
+            FLIPR:CollapseDropdown()
+            FLIPR:ExpandDropdown(itemID)
+            row.itemData.selected = true
+            row.selectionTexture:Show()
+            row.defaultBg:Hide()
+            FLIPR.selectedItem = row.itemData
+        end
+    end
+    
+    -- Set click handlers
     itemLinkButton:SetScript("OnClick", function(self, button)
         if IsModifiedClick("CHATLINK") then
             ChatEdit_InsertLink(item:GetItemLink())
             return
         end
-        
-        -- Handle row expansion just like the main row click
-        -- Clear previous selection's visual state if it exists
-        if FLIPR.selectedItem and FLIPR.itemRows[FLIPR.selectedItem.itemID] then
-            local prevRow = FLIPR.itemRows[FLIPR.selectedItem.itemID].frame:GetChildren()
-            if prevRow then
-                prevRow.selectionTexture:Hide()
-                prevRow.defaultBg:Show()
-            end
-        end
-        
-        if FLIPR.expandedItemID == itemID then
-            -- Collapse if clicking same item
-            FLIPR:CollapseDropdown()
-            row.itemData.selected = false
-            row.selectionTexture:Hide()
-            row.defaultBg:Show()
-            FLIPR.selectedItem = nil
-        else
-            -- Collapse previous and expand new
-            FLIPR:CollapseDropdown()
-            FLIPR:ExpandDropdown(itemID)
-            row.itemData.selected = true
-            row.selectionTexture:Show()
-            row.defaultBg:Hide()
-            FLIPR.selectedItem = row.itemData
-        end
+        handleClick()
     end)
-
-    -- Restore row click handler for selection
-    row:SetScript("OnClick", function(self, button)
-        -- Clear previous selection's visual state if it exists
-        if FLIPR.selectedItem and FLIPR.itemRows[FLIPR.selectedItem.itemID] then
-            local prevRow = FLIPR.itemRows[FLIPR.selectedItem.itemID].frame:GetChildren()
-            if prevRow then
-                prevRow.selectionTexture:Hide()
-                prevRow.defaultBg:Show()
-            end
-        end
-        
-        if FLIPR.expandedItemID == itemID then
-            -- Collapse if clicking same item
-            FLIPR:CollapseDropdown()
-            row.itemData.selected = false
-            row.selectionTexture:Hide()
-            row.defaultBg:Show()
-            FLIPR.selectedItem = nil
-        else
-            -- Collapse previous and expand new
-            FLIPR:CollapseDropdown()
-            FLIPR:ExpandDropdown(itemID)
-            row.itemData.selected = true
-            row.selectionTexture:Show()
-            row.defaultBg:Hide()
-            FLIPR.selectedItem = row.itemData
-        end
-    end)
-
-    item:ContinueOnItemLoad(function()
-        local itemLink = item:GetItemLink()
-        nameText:SetText(itemLink)
-        itemIcon:SetTexture(item:GetItemIcon())
-    end)
+    
+    row:SetScript("OnClick", handleClick)
     
     -- Price text (center-aligned)
     local priceText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -810,36 +903,9 @@ function FLIPR:CreateProfitableItemRow(flipOpportunity, results)
         GetCoinTextureString(flipOpportunity.totalProfit),
         flipOpportunity.roi
     ))
-
-    -- Store item data with the row
-    row.itemData = {
-        itemID = results[1].itemID,
-        minPrice = results[1].minPrice,
-        totalQuantity = results[1].totalQuantity,
-        auctionID = results[1].auctionID,
-        isCommodity = results[1].isCommodity,
-        selected = false,
-        allAuctions = results
-    }
-
-    -- Auto-scroll if we're near the bottom
-    if self.scrollFrame then
-        local scrollBar = self.scrollFrame.ScrollBar
-        if scrollBar then
-            local currentScroll = scrollBar:GetValue() or 0
-            local maxScroll = (self.profitableItemCount * ROW_HEIGHT) - self.scrollFrame:GetHeight()
-            
-            -- If we're within 100 pixels of the bottom, or if this is the first item
-            if maxScroll <= 0 or (maxScroll - currentScroll) < 100 then
-                -- Use After to ensure the scroll happens after the frame updates
-                C_Timer.After(0.1, function()
-                    if scrollBar and scrollBar.SetValue then
-                        scrollBar:SetValue(maxScroll)
-                    end
-                end)
-            end
-        end
-    end
+    
+    -- Initial position
+    self:UpdateRowPositions()
 end
 
 function FLIPR:UpdateRowPositions()
@@ -847,12 +913,13 @@ function FLIPR:UpdateRowPositions()
     local expandedRowData = self.expandedItemID and self.itemRows[self.expandedItemID]
     local dropdownHeight = expandedRowData and (math.min(#expandedRowData.results, MAX_DROPDOWN_ROWS) * ROW_HEIGHT) or 0
     
+    -- Update positions for all rows
     for id, rowData in pairs(self.itemRows) do
         local yOffset = (rowData.rowIndex - 1) * ROW_HEIGHT
         
         -- If this row is below an expanded row, add dropdown height
         if expandedIndex > 0 and rowData.rowIndex > expandedIndex then
-            yOffset = yOffset + dropdownHeight
+            yOffset = yOffset + dropdownHeight + DROPDOWN_PADDING
         end
         
         rowData.frame:ClearAllPoints()
@@ -863,13 +930,14 @@ function FLIPR:UpdateRowPositions()
     -- Update scroll child height
     local totalHeight = (self.profitableItemCount * ROW_HEIGHT)
     if self.expandedItemID then
-        totalHeight = totalHeight + dropdownHeight
+        totalHeight = totalHeight + dropdownHeight + DROPDOWN_PADDING
     end
     self.scrollChild:SetHeight(math.max(1, totalHeight))
 end
 
 function FLIPR:CollapseDropdown()
     if not self.expandedItemID then return end
+    print("Collapsing dropdown for itemID:", self.expandedItemID)
     
     local rowData = self.itemRows[self.expandedItemID]
     if rowData and rowData.dropdown then
@@ -883,11 +951,16 @@ function FLIPR:CollapseDropdown()
 end
 
 function FLIPR:ExpandDropdown(itemID)
+    print("ExpandDropdown called for itemID:", itemID)
     local rowData = self.itemRows[itemID]
-    if not rowData then return end
+    if not rowData then 
+        print("No row data found for itemID:", itemID)
+        return 
+    end
     
     -- Get actual number of auctions (capped at MAX_DROPDOWN_ROWS)
     local numAuctions = math.min(#rowData.results, MAX_DROPDOWN_ROWS)
+    print("Creating dropdown with", numAuctions, "rows")
     
     -- Create dropdown
     local dropdown = CreateFrame("Frame", nil, rowData.frame)
@@ -895,11 +968,22 @@ function FLIPR:ExpandDropdown(itemID)
     dropdown:SetPoint("TOPRIGHT", rowData.frame, "BOTTOMRIGHT", 0, 0)
     dropdown:SetHeight(numAuctions * ROW_HEIGHT)
     
+    -- Set background
+    local bg = dropdown:CreateTexture(nil, "BACKGROUND")
+    bg:SetAllPoints()
+    bg:SetColorTexture(0.1, 0.1, 0.1, 0.3)
+    
     -- Create child auction rows
     self:CreateDropdownRows(dropdown, rowData.results)
     
     rowData.dropdown = dropdown
     self.expandedItemID = itemID
+    
+    -- Make sure dropdown is shown
+    dropdown:Show()
+    print("Dropdown created and shown")
+    
+    -- Update positions after creating dropdown
     self:UpdateRowPositions()
     
     -- Auto-select first row

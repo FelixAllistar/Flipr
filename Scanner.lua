@@ -29,7 +29,22 @@ end
 
 function FLIPR:StartRetryCheck(itemID, itemKey)
     -- Clear any existing retry timer
-    self.retryTimer = nil
+    if self.retryTimer then
+        self.retryTimer:Cancel()
+        self.retryTimer = nil
+    end
+    
+    -- Don't start a new timer if we're paused
+    if self.isPaused or self.shouldPauseAfterItem then
+        print("|cFFFF0000PAUSED|r")
+        self.isPaused = true
+        self.isScanning = false
+        self.shouldPauseAfterItem = false
+        if self.scanButton then
+            self.scanButton:SetText("Resume Scan")
+        end
+        return
+    end
     
     -- Initialize retry state
     self.retryState = {
@@ -40,16 +55,8 @@ function FLIPR:StartRetryCheck(itemID, itemKey)
     
     -- Start retry timer
     self.retryTimer = C_Timer.NewTicker(1, function()
-        -- Check pause state first
-        if self.isPaused or self.shouldPauseAfterItem then
-            print("|cFFFF0000PAUSED|r")
-            self.isPaused = true
-            self.isScanning = false
-            self.shouldPauseAfterItem = false
-            if self.scanButton then
-                self.scanButton:SetText("Resume Scan")
-            end
-            -- Cancel the timer
+        -- Check if we should stop
+        if not self.isScanning or self.isPaused then
             if self.retryTimer then
                 self.retryTimer:Cancel()
                 self.retryTimer = nil
@@ -64,7 +71,6 @@ function FLIPR:StartRetryCheck(itemID, itemKey)
             if self.scanButton then
                 self.scanButton:SetText("Scan Items")
             end
-            -- Cancel the timer
             if self.retryTimer then
                 self.retryTimer:Cancel()
                 self.retryTimer = nil
