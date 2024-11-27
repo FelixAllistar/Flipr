@@ -3,6 +3,7 @@
 ## Notes: Auction House Flipping Helper
 ## Author: YourName
 ## Version: 0.069
+## SavedVariables: FliprDB
 
 # Libraries
 Libs\LibStub\LibStub.lua

@@ -140,6 +140,59 @@ local function DecodeOldGroupOrItemList(str)
     }
 end
 
+-- Add this conversion function
+local function ConvertFliprToTSM(fliprData)
+    print("Converting Flipr data to TSM format...")
+    
+    local tsmData = {
+        groupName = nil,
+        items = {},
+        groups = {},
+        groupOperations = {},
+        operations = {},
+        customSources = {}
+    }
+    
+    -- Helper function to process groups recursively
+    local function processGroup(groupData, parentPath)
+        print("Processing group:", groupData.name)
+        local currentPath = parentPath and (parentPath .. "/" .. groupData.name) or groupData.name
+        
+        -- Set root group name if not set
+        if not tsmData.groupName then
+            tsmData.groupName = groupData.name
+            print("Set root group name:", tsmData.groupName)
+        end
+        
+        -- Add group to groups table
+        tsmData.groups[currentPath] = true
+        print("Added group path:", currentPath)
+        
+        -- Process items in this group
+        if groupData.items then
+            for itemId, itemInfo in pairs(groupData.items) do
+                print("Processing item:", itemId, itemInfo.name)
+                tsmData.items["i:" .. itemId] = currentPath
+            end
+        end
+        
+        -- Process subgroups
+        if groupData.children then
+            for _, childGroup in pairs(groupData.children) do
+                processGroup(childGroup, currentPath)
+            end
+        end
+    end
+    
+    -- Start processing from root level
+    for groupName, groupData in pairs(fliprData) do
+        print("Processing root group:", groupName)
+        processGroup(groupData)
+    end
+    
+    return tsmData
+end
+
 local function TestTSMImport(importString)
     -- Try each decode method in order
     local success, data = DecodeNewImport(importString)
@@ -152,7 +205,7 @@ local function TestTSMImport(importString)
 
     if not success then
         print("Failed to decode import string using any method")
-        return
+        return false, nil
     end
 
     -- Print the decoded data structure
@@ -225,7 +278,147 @@ local function TestTSMImport(importString)
     for k,v in pairs(data) do
         print("  " .. k .. " = " .. type(v))
     end
+
+    return true, data
 end
 
--- Make function available globally for testing
+-- Add this function before TestTSMImport
+local function ConvertToFliprFormat(tsmData)
+    print("Converting TSM data to Flipr format...")
+    
+    local fliprData = {}
+    
+    -- Get the root group name from TSM data
+    local rootGroup = tsmData.groupName
+    if not rootGroup then
+        print("ERROR: No root group name found in TSM data")
+        return nil
+    end
+    
+    -- Initialize root group
+    fliprData[rootGroup] = {
+        name = rootGroup,
+        items = {},
+        children = {}
+    }
+    
+    -- Helper function to ensure group path exists
+    local function ensureGroupPath(path)
+        local current = fliprData[rootGroup]
+        
+        -- Split the subpath
+        local parts = {strsplit("/", path)}
+        for i = 1, #parts do
+            local partName = parts[i]
+            if not current.children then
+                current.children = {}
+            end
+            current.children[partName] = current.children[partName] or {
+                name = partName,
+                items = {},
+                children = {}
+            }
+            current = current.children[partName]
+        end
+        
+        return current
+    end
+    
+    -- Process items
+    for itemString, groupPath in pairs(tsmData.items) do
+        local itemId = itemString:match("i:(%d+)")
+        if itemId then
+            local group = ensureGroupPath(groupPath)
+            if group then
+                group.items[itemId] = {
+                    name = GetItemInfo(itemId) or itemId,
+                    marketValue = 0,
+                    saleRate = 0
+                }
+            end
+        end
+    end
+    
+    -- Print group structure and count items
+    local totalFliprItems = 0
+    local function printGroupStructure(group, indent)
+        indent = indent or 0
+        local prefix = string.rep("  ", indent)
+        
+        -- Count items in this group AND its children
+        local function countGroupItems(g)
+            local count = 0
+            -- Count direct items
+            for itemId, _ in pairs(g.items) do
+                count = count + 1
+                if indent == 0 then  -- Only increment total once at root level
+                    totalFliprItems = totalFliprItems + 1
+                end
+            end
+            -- Count items in children
+            for _, child in pairs(g.children) do
+                count = count + countGroupItems(child)
+            end
+            return count
+        end
+        
+        -- Get total items for this group and its children
+        local totalItems = countGroupItems(group)
+        
+        -- Always show item count for debugging purposes
+        print(prefix .. group.name .. " (" .. totalItems .. " items)")
+        
+        -- Print children in sorted order
+        local children = {}
+        for _, child in pairs(group.children) do
+            table.insert(children, child)
+        end
+        table.sort(children, function(a,b) return a.name < b.name end)
+        
+        for _, child in ipairs(children) do
+            printGroupStructure(child, indent + 1)
+        end
+    end
+    
+    print("\nConverted group structure:")
+    printGroupStructure(fliprData[rootGroup])
+    print("\nTotal Flipr items:", totalFliprItems)
+    
+    return fliprData
+end
+
+-- Add this function after ConvertToFliprFormat
+local function SaveImportedGroup(fliprData)
+    -- Get reference to FLIPR addon
+    local FLIPR = LibStub("AceAddon-3.0"):GetAddon("Flipr")
+    if not FLIPR then
+        print("Error: Could not find FLIPR addon")
+        return false
+    end
+    
+    -- For each root group in the imported data
+    for groupName, groupData in pairs(fliprData) do
+        -- If group exists, remove it first
+        if FLIPR.groupDB.groups[groupName] then
+            print("Updating existing group:", groupName)
+            FLIPR.groupDB.groups[groupName] = nil
+        else
+            print("Adding new group:", groupName)
+        end
+        
+        -- Save new group data
+        FLIPR.groupDB.groups[groupName] = groupData
+    end
+    
+    -- Trigger UI refresh if needed
+    if FLIPR.RefreshGroupList then
+        FLIPR:RefreshGroupList()
+    end
+    
+    return true
+end
+
+-- Make functions available globally
 _G.TestTSMImport = TestTSMImport
+_G.ConvertToFliprFormat = ConvertToFliprFormat
+_G.SaveImportedGroup = SaveImportedGroup

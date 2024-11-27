@@ -100,6 +100,13 @@ function FLIPR:InitializeDB()
 end
 
 function FLIPR:OnInitialize()
+    -- Initialize saved variables for imported groups
+    FliprDB = FliprDB or {
+        groups = {},
+        version = 1
+    }
+    self.groupDB = FliprDB
+    
     -- Create settings if they don't exist
     if not FLIPRSettings then
         FLIPRSettings = defaultSettings

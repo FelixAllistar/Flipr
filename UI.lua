@@ -499,6 +499,7 @@ function FLIPR:CreateTitleButtons(titleSection)
     -- Add click handler for GROUP TEST
     groupTestButton:SetScript("OnClick", function()
         local AceGUI = LibStub("AceGUI-3.0")
+        local tempTSMData = nil  -- Will store the temporary TSM table
         
         -- Create a container frame
         local frame = AceGUI:Create("Frame")
@@ -526,9 +527,34 @@ function FLIPR:CreateTitleButtons(titleSection)
         testButton:SetText("Test Import")
         testButton:SetWidth(150)
         testButton:SetCallback("OnClick", function()
-            TestTSMImport(editbox:GetText())
+            local success, data = TestTSMImport(editbox:GetText())
+            if success then
+                tempTSMData = data  -- Store the imported data temporarily
+                print("TSM data stored in temporary variable")
+            end
         end)
         frame:AddChild(testButton)
+        
+        -- Add convert button to the same frame
+        local convertBtn = AceGUI:Create("Button")
+        convertBtn:SetText("Convert to Flipr")
+        convertBtn:SetWidth(150)
+        convertBtn:SetCallback("OnClick", function()
+            if tempTSMData then
+                print("Converting temporary TSM data to Flipr format...")
+                local fliprData = ConvertToFliprFormat(tempTSMData)
+                if fliprData then
+                    if SaveImportedGroup(fliprData) then
+                        print("Group successfully imported and saved!")
+                    else
+                        print("Error saving group data")
+                    end
+                end
+            else
+                print("No TSM data available - click Test Import first!")
+            end
+        end)
+        frame:AddChild(convertBtn)
     end)
     
     -- Add progress text
