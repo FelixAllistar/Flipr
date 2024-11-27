@@ -774,21 +774,6 @@ function FLIPR:RemoveItemRow(itemID)
     end
 end
 
-function FLIPR:BuyItem(itemData)
-    -- ... existing purchase code ...
-    
-    -- After successful purchase:
-    self:RemoveItemRow(itemData.itemID)
-    
-    -- Rescan this item
-    local itemKey = C_AuctionHouse.MakeItemKey(itemData.itemID)
-    if itemData.isCommodity then
-        C_AuctionHouse.SendSearchQuery(nil, {}, true, itemData.itemID)
-    else
-        C_AuctionHouse.SendSearchQuery(itemKey, {}, true)
-    end
-end
-
 function FLIPR:RescanSingleItem(itemID)
     if not itemID then
         print("Error: No itemID provided to RescanSingleItem")
