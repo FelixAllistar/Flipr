@@ -2,6 +2,7 @@ local addonName, addon = ...
 local FLIPR = addon.FLIPR
 
 function FLIPR:InitializeDB()
+    print("=== DATABASE.LUA InitializeDB START ===")
     print("Initializing database...")
     self.itemDB = {}
     self.availableGroups = self:GetAvailableGroups()

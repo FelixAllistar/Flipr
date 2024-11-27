@@ -6,7 +6,7 @@ function FLIPR:IsCommodityItem(itemID)
     return itemInfo and itemInfo.isCommodity
 end
 
-function FLIPR:ClearAllSelections()
+function FLIPR:ClearPurchaseSelections()
     self.oldSelectedItem = self.selectedItem
     
     if self.oldSelectedItem then

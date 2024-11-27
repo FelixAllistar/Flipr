@@ -72,33 +72,6 @@ function FLIPR:GetItemsFromGroup(groupTable, path)
     return self:GetItemsFromGroup(currentTable)
 end
 
-function FLIPR:InitializeDB()
-    print("Initializing database...")
-    self.itemDB = {}
-    self.availableGroups = self:GetAvailableGroups()
-    
-    -- Load items from enabled groups
-    print("Loading items from enabled groups...")
-    for tableName, groupData in pairs(self.availableGroups) do
-        print("Processing table:", tableName)
-        for groupPath, enabled in pairs(self.db.enabledGroups) do
-            if enabled then
-                print("Loading enabled group:", groupPath)
-                local items = self:GetItemsFromGroup(groupData, groupPath)
-                for itemId, itemData in pairs(items) do
-                    self.itemDB[itemId] = itemData
-                end
-            end
-        end
-    end
-    
-    local totalItems = 0
-    for _ in pairs(self.itemDB) do
-        totalItems = totalItems + 1
-    end
-    print("Total items loaded into database:", totalItems)
-end
-
 function FLIPR:OnInitialize()
     -- Initialize saved variables for imported groups
     FliprDB = FliprDB or {

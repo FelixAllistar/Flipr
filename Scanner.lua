@@ -599,7 +599,7 @@ function FLIPR:ProcessAuctionResults(results)
     end
 end
 
-function FLIPR:ClearAllSelections()
+function FLIPR:ClearScanSelections()
     -- Clear previous selection if it exists
     if self.selectedRow then
         self.selectedRow.itemData.selected = false
