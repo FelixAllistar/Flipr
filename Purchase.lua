@@ -43,6 +43,7 @@ function FLIPR:SelectItem(row)
 end
 
 function FLIPR:CreateBuyConfirmationFrame()
+    print("=== DEBUG: Creating Buy Frame ===")
     local frame = CreateFrame("Frame", "FLIPRBuyConfirmFrame", UIParent)
     frame:SetSize(300, 200)
     frame:SetPoint("CENTER")
@@ -63,48 +64,129 @@ function FLIPR:CreateBuyConfirmationFrame()
     title:SetText("Purchase Confirmation")
     
     frame.itemText = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    frame.itemText:SetPoint("TOPLEFT", 20, -50)
+    frame.itemText:SetPoint("TOP", title, "BOTTOM", 0, -10)
     
-    frame.qtyText = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    frame.qtyText:SetPoint("TOPLEFT", 20, -70)
+    local priceContainer = CreateFrame("Frame", nil, frame)
+    priceContainer:SetPoint("TOP", frame.itemText, "BOTTOM", 0, -10)
+    priceContainer:SetSize(200, 100)
     
-    frame.priceText = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    frame.priceText:SetPoint("TOPLEFT", 20, -90)
+    frame.priceLines = {}
+    for i = 1, 5 do
+        local priceLine = priceContainer:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        priceLine:SetPoint("TOP", priceContainer, "TOP", 0, -(i-1) * 15)
+        priceLine:SetJustifyH("CENTER")
+        frame.priceLines[i] = priceLine
+    end
     
     frame.totalText = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    frame.totalText:SetPoint("TOPLEFT", 20, -120)
+    frame.totalText:SetPoint("BOTTOM", frame, "BOTTOM", 0, 50)
     
     local buyButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     buyButton:SetSize(100, 22)
     buyButton:SetPoint("BOTTOMRIGHT", -20, 20)
     buyButton:SetText("Buy")
-    buyButton:SetScript("OnClick", function()
-        if not self.selectedItem then return end
-        
-        local itemID = self.selectedItem.itemID
-        local quantity = self.selectedItem.totalQuantity
-        local unitPrice = self.selectedItem.minPrice
-        local isCommodity = self:IsCommodityItem(itemID)
-        
-        if isCommodity then
-            C_AuctionHouse.StartCommoditiesPurchase(itemID, quantity)
-            self:RegisterEvent("AUCTION_HOUSE_THROTTLED_SYSTEM_READY", function()
-                C_AuctionHouse.ConfirmCommoditiesPurchase(itemID, quantity)
-                self:UnregisterEvent("AUCTION_HOUSE_THROTTLED_SYSTEM_READY")
-            end)
-        else
-            C_AuctionHouse.PlaceBid(self.selectedItem.auctionID, unitPrice * quantity)
-        end
-        
-        frame:Hide()
-    end)
     
     local cancelButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     cancelButton:SetSize(100, 22)
     cancelButton:SetPoint("BOTTOMLEFT", 20, 20)
     cancelButton:SetText("Cancel")
-    cancelButton:SetScript("OnClick", function() frame:Hide() end)
+    
+    frame.UpdateDisplay = function(self, itemData)
+        if not itemData then return end
+        
+        local itemName = GetItemInfo(itemData.itemID)
+        self.itemText:SetText("Item: " .. itemName)
+        
+        for _, line in ipairs(self.priceLines) do
+            line:SetText("")
+        end
+        
+        local totalCost = 0
+        local totalQuantity = 0
+        
+        if itemData.selectedAuctions then
+            for i, auction in pairs(itemData.selectedAuctions) do
+                if i <= #self.priceLines then
+                    local subtotal = auction.minPrice * auction.totalQuantity
+                    totalCost = totalCost + subtotal
+                    totalQuantity = totalQuantity + auction.totalQuantity
+                    
+                    self.priceLines[i]:SetText(string.format(
+                        "%s x%d = %s",
+                        GetCoinTextureString(auction.minPrice),
+                        auction.totalQuantity,
+                        GetCoinTextureString(subtotal)
+                    ))
+                end
+            end
+        end
+        
+        self.totalText:SetText(string.format("Total: %s", GetCoinTextureString(totalCost)))
+    end
+    
+    buyButton:SetScript("OnClick", function()
+        if not self.selectedItem then return end
+        
+        print("=== DEBUG: Buy Button Clicked ===")
+        print("Selected Item:", self.selectedItem.itemID)
+        if self.selectedItem.selectedAuctions then
+            print("Selected Auctions:", #self.selectedItem.selectedAuctions)
+            for i, auction in pairs(self.selectedItem.selectedAuctions) do
+                print(string.format("  [%d] price: %s, qty: %d", 
+                    i, 
+                    GetCoinTextureString(auction.minPrice), 
+                    auction.totalQuantity
+                ))
+            end
+        else
+            print("No selectedAuctions found!")
+            print("Available keys in selectedItem:")
+            for k,v in pairs(self.selectedItem) do
+                print("  Has key:", k)
+            end
+        end
+        
+        local itemID = self.selectedItem.itemID
+        local isCommodity = self:IsCommodityItem(itemID)
+        
+        if isCommodity then
+            local totalQty = 0
+            for _, auction in pairs(self.selectedItem.selectedAuctions) do
+                totalQty = totalQty + auction.totalQuantity
+            end
+            
+            C_AuctionHouse.StartCommoditiesPurchase(itemID, totalQty)
+            self:RegisterEvent("AUCTION_HOUSE_THROTTLED_SYSTEM_READY", function()
+                C_AuctionHouse.ConfirmCommoditiesPurchase(itemID, totalQty)
+                self:UnregisterEvent("AUCTION_HOUSE_THROTTLED_SYSTEM_READY")
+            end)
+        else
+            for _, auction in pairs(self.selectedItem.selectedAuctions) do
+                C_AuctionHouse.PlaceBid(auction.auctionID, auction.minPrice * auction.totalQuantity)
+            end
+        end
+        
+        frame:Hide()
+    end)
+    
+    cancelButton:SetScript("OnClick", function() 
+        frame:Hide() 
+    end)
     
     frame:Hide()
     return frame
+end
+
+function FLIPR:BuySelectedAuctions()
+    if not self.selectedItem then
+        print("No items selected!")
+        return
+    end
+    
+    if not self.buyConfirmFrame then
+        self.buyConfirmFrame = self:CreateBuyConfirmationFrame()
+    end
+    
+    self.buyConfirmFrame:UpdateDisplay(self.selectedItem)
+    self.buyConfirmFrame:Show()
 end 

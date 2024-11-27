@@ -662,28 +662,8 @@ function FLIPR:CreateTitleButtons(titleSection)
         -- Debug output
         print("Attempting to buy item:", self.selectedItem.itemID)
         
-        -- Rescan the item before showing buy confirmation
-        self:RescanSingleItem(self.selectedItem.itemID)
-        
-        if not self.buyConfirmFrame then
-            self.buyConfirmFrame = self:CreateBuyConfirmationFrame()
-        end
-        
-        local itemName = GetItemInfo(self.selectedItem.itemID)
-        if not itemName then
-            print("Error: Could not get item info")
-            return
-        end
-        
-        local totalQty = self.selectedItem.totalQuantity or 0
-        local totalPrice = (self.selectedItem.minPrice or 0) * totalQty
-        
-        self.buyConfirmFrame.itemText:SetText("Item: " .. itemName)
-        self.buyConfirmFrame.qtyText:SetText(string.format("Quantity: %d", totalQty))
-        self.buyConfirmFrame.priceText:SetText(string.format("Price Each: %s", GetCoinTextureString(self.selectedItem.minPrice)))
-        self.buyConfirmFrame.totalText:SetText(string.format("Total: %s", GetCoinTextureString(totalPrice)))
-        
-        self.buyConfirmFrame:Show()
+        -- Call BuySelectedAuctions from Purchase.lua
+        self:BuySelectedAuctions()
     end)
     
     -- Store references and set up click handlers
@@ -951,12 +931,10 @@ function FLIPR:CollapseDropdown()
 end
 
 function FLIPR:ExpandDropdown(itemID)
-    print("ExpandDropdown called for itemID:", itemID)
+    print("=== DEBUG: ExpandDropdown ===")
+    print("ItemID:", itemID)
     local rowData = self.itemRows[itemID]
-    if not rowData then 
-        print("No row data found for itemID:", itemID)
-        return 
-    end
+    print("Number of results:", rowData and #rowData.results or "no results")
     
     -- Get actual number of auctions (capped at MAX_DROPDOWN_ROWS)
     local numAuctions = math.min(#rowData.results, MAX_DROPDOWN_ROWS)
@@ -1037,83 +1015,65 @@ function FLIPR:CreateDropdownRows(dropdown, results)
 end
 
 function FLIPR:SelectAuctionRange(dropdown, selectedIndex)
-    -- Update selection visuals and gather selected auctions
+    print("=== DEBUG: SelectAuctionRange ===")
+    print("SelectedIndex:", selectedIndex)
+    print("Number of dropdown rows:", #dropdown.rows)
+    
     local selectedAuctions = {}
     local totalCost = 0
     local totalQuantity = 0
     
+    -- First, clear all selected flags
+    local rowData = self.itemRows[self.expandedItemID]
+    if rowData and rowData.auctions then
+        for _, auction in ipairs(rowData.auctions) do
+            auction.selected = false
+        end
+    end
+    
+    -- Update selections and visuals
     for i, row in ipairs(dropdown.rows) do
         local isSelected = i <= selectedIndex
-        row.selectionTexture:SetShown(isSelected)
+        row.selectionTexture:SetShown(isSelected)  -- Show/hide selection highlight
         
         if isSelected then
             selectedAuctions[i] = row.auctionData
+            row.auctionData.selected = true  -- Set selected flag
             totalCost = totalCost + (row.auctionData.minPrice * row.auctionData.totalQuantity)
             totalQuantity = totalQuantity + row.auctionData.totalQuantity
+        else
+            row.selectionTexture:Hide()  -- Ensure unselected rows have no highlight
         end
     end
     
     -- Store selected auctions info
-    local rowData = self.itemRows[self.expandedItemID]
     if rowData then
         rowData.selectedAuctions = selectedAuctions
         rowData.totalCost = totalCost
         rowData.totalQuantity = totalQuantity
-    end
-end
-
-function FLIPR:BuySelectedAuctions()
-    if not self.selectedItem then
-        print("No items selected!")
-        return
+        
+        -- Update the main itemData to reflect all selected auctions
+        if self.selectedItem and self.selectedItem.itemID == self.expandedItemID then
+            self.selectedItem.totalQuantity = totalQuantity
+            self.selectedItem.selectedAuctions = selectedAuctions
+            self.selectedItem.totalCost = totalCost
+            self.selectedItem.auctions = rowData.auctions  -- Make sure auctions are passed through
+        end
     end
     
-    local itemData = self.selectedItem
-    local totalCost = itemData.minPrice * itemData.totalQuantity
-    
-    -- If we have expanded auctions selected, use those instead
-    if self.expandedItemID and self.itemRows[self.expandedItemID].selectedAuctions then
-        local rowData = self.itemRows[self.expandedItemID]
-        totalCost = rowData.totalCost
-        itemData.totalQuantity = rowData.totalQuantity
-        itemData.selectedAuctions = rowData.selectedAuctions
+    print("=== DEBUG: Stored Selected Auctions ===")
+    if self.selectedItem and self.selectedItem.selectedAuctions then
+        print("Number of selected auctions:", #self.selectedItem.selectedAuctions)
+        for i, auction in pairs(self.selectedItem.selectedAuctions) do
+            print(string.format("  [%d] price: %s, qty: %d", 
+                i, 
+                GetCoinTextureString(auction.minPrice), 
+                auction.totalQuantity
+            ))
+        end
+    else
+        print("No auctions stored!")
     end
-
-    StaticPopupDialogs["FLIPR_CONFIRM_PURCHASE"] = {
-        text = string.format("Purchase %d items for %s?", 
-            itemData.totalQuantity, 
-            GetCoinTextureString(totalCost)),
-        button1 = "Yes",
-        button2 = "No",
-        OnAccept = function()
-            if itemData.selectedAuctions then
-                -- Buy multiple selected auctions
-                for _, auction in pairs(itemData.selectedAuctions) do
-                    if auction.isCommodity then
-                        C_AuctionHouse.PurchaseCommodity(auction.itemID, auction.quantity, auction.minPrice)
-                    else
-                        C_AuctionHouse.PlaceBid(auction.auctionID, auction.minPrice)
-                    end
-                end
-            else
-                -- Buy single auction
-                if itemData.isCommodity then
-                    C_AuctionHouse.PurchaseCommodity(itemData.itemID, itemData.totalQuantity, itemData.minPrice)
-                else
-                    C_AuctionHouse.PlaceBid(itemData.auctionID, itemData.minPrice)
-                end
-            end
-            
-            -- Collapse and refresh
-            self:CollapseDropdown()
-            self:RescanItem(itemData.itemID)
-        end,
-        timeout = 0,
-        whileDead = true,
-        hideOnEscape = true,
-        preferredIndex = 3,
-    }
-    StaticPopup_Show("FLIPR_CONFIRM_PURCHASE")
 end
 
 function FLIPR:RescanItem(itemID)
@@ -1132,5 +1092,74 @@ function FLIPR:RescanItem(itemID)
         local itemKey = C_AuctionHouse.MakeItemKey(itemID)
         C_AuctionHouse.SendSearchQuery(itemKey, {}, true)
     end
+end
+
+function FLIPR:BuySelectedAuctions()
+    if not self.selectedItem then
+        print("No items selected!")
+        return
+    end
+    
+    local itemData = self.selectedItem
+    local totalCost = 0
+    local totalQuantity = 0
+    
+    -- DETAILED DEBUG OUTPUT
+    print("=== DEBUG: Buy Selected Auctions ===")
+    print("ExpandedItemID:", self.expandedItemID)
+    print("Selected Item ID:", itemData.itemID)
+    
+    if itemData.selectedAuctions then
+        print("Number of selected auctions:", #itemData.selectedAuctions)
+        for i, auction in pairs(itemData.selectedAuctions) do
+            print(string.format("Auction[%d]: Price=%s, Qty=%d, Total=%s",
+                i,
+                GetCoinTextureString(auction.minPrice),
+                auction.totalQuantity,
+                GetCoinTextureString(auction.minPrice * auction.totalQuantity)
+            ))
+        end
+    else
+        print("selectedAuctions is nil!")
+        -- Let's check what we do have
+        for k,v in pairs(itemData) do
+            print("itemData has key:", k)
+        end
+    end
+    print("=== End Debug ===")
+    
+    -- Show confirmation frame
+    if not self.buyConfirmFrame then
+        self.buyConfirmFrame = self:CreateBuyConfirmationFrame()
+    end
+    
+    local itemName = GetItemInfo(itemData.itemID)
+    if not itemName then
+        print("Error: Could not get item info")
+        return
+    end
+    
+    -- Calculate totals and build price breakdown text
+    local priceBreakdown = "Price Breakdown:"
+    if itemData.selectedAuctions then
+        for i, auction in pairs(itemData.selectedAuctions) do
+            local subtotal = auction.minPrice * auction.totalQuantity
+            totalCost = totalCost + subtotal
+            totalQuantity = totalQuantity + auction.totalQuantity
+            priceBreakdown = priceBreakdown .. string.format(
+                "\n%s x%d = %s", 
+                GetCoinTextureString(auction.minPrice),
+                auction.totalQuantity,
+                GetCoinTextureString(subtotal)
+            )
+        end
+    end
+    
+    self.buyConfirmFrame.itemText:SetText("Item: " .. itemName)
+    self.buyConfirmFrame.qtyText:SetText(string.format("Total Quantity: %d", totalQuantity))
+    self.buyConfirmFrame.priceText:SetText(priceBreakdown)
+    self.buyConfirmFrame.totalText:SetText(string.format("Total Cost: %s", GetCoinTextureString(totalCost)))
+    
+    self.buyConfirmFrame:Show()
 end
  
