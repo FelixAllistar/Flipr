@@ -52,31 +52,26 @@ local function DecodeNewImport(str)
     -- Step 1: Base64 decode
     local decoded = LibDeflate:DecodeForPrint(str)
     if not decoded then
-        print("Failed to decode Base64 string")
         return false
     end
 
     -- Step 2: Decompress
     local decompressed = LibDeflate:DecompressDeflate(decoded)
     if not decompressed then
-        print("Failed to decompress data")
         return false
     end
 
     -- Step 3: Deserialize using LibSerialize (new format)
     local success, magicStr, version, groupName, items, groups, groupOperations, operations, customSources = LibSerialize:Deserialize(decompressed)
     if not success then
-        print("Failed to deserialize data")
         return false
     end
 
     -- Validate magic string and version
     if magicStr ~= MAGIC_STR then
-        print("Invalid magic string:", magicStr)
         return false
     end
     if version ~= VERSION then
-        print("Invalid version:", version)
         return false
     end
 
@@ -92,14 +87,12 @@ end
 
 local function DecodeOldImport(str)
     if strsub(str, 1, 1) ~= "^" then
-        print("Not an old import string")
         return false
     end
 
     -- Deserialize using AceSerializer (old format)
     local success, data = AceSerializer:Deserialize(str)
     if not success then
-        print("Failed to deserialize old format data")
         return false
     end
 
@@ -142,8 +135,6 @@ end
 
 -- Add this conversion function
 local function ConvertFliprToTSM(fliprData)
-    print("Converting Flipr data to TSM format...")
-    
     local tsmData = {
         groupName = nil,
         items = {},
@@ -155,23 +146,19 @@ local function ConvertFliprToTSM(fliprData)
     
     -- Helper function to process groups recursively
     local function processGroup(groupData, parentPath)
-        print("Processing group:", groupData.name)
         local currentPath = parentPath and (parentPath .. "/" .. groupData.name) or groupData.name
         
         -- Set root group name if not set
         if not tsmData.groupName then
             tsmData.groupName = groupData.name
-            print("Set root group name:", tsmData.groupName)
         end
         
         -- Add group to groups table
         tsmData.groups[currentPath] = true
-        print("Added group path:", currentPath)
         
         -- Process items in this group
         if groupData.items then
             for itemId, itemInfo in pairs(groupData.items) do
-                print("Processing item:", itemId, itemInfo.name)
                 tsmData.items["i:" .. itemId] = currentPath
             end
         end
@@ -186,7 +173,6 @@ local function ConvertFliprToTSM(fliprData)
     
     -- Start processing from root level
     for groupName, groupData in pairs(fliprData) do
-        print("Processing root group:", groupName)
         processGroup(groupData)
     end
     
@@ -204,26 +190,25 @@ local function TestTSMImport(importString)
     end
 
     if not success then
-        print("Failed to decode import string using any method")
         return false, nil
     end
 
     -- Print the decoded data structure
-    print("Successfully decoded TSM group import!")
-    print("Structure:")
+    -- print("Successfully decoded TSM group import!")
+    -- print("Structure:")
     
     -- Print groups
-    print("\nGroups:")
+    -- print("\nGroups:")
     if data.groups then
         for groupPath, _ in pairs(data.groups) do
-            print("  - " .. groupPath)
+            -- print("  - " .. groupPath)
         end
     else
-        print("  No groups found")
+        -- print("  No groups found")
     end
 
     -- Print items with enhanced information
-    print("\nItems:")
+    -- print("\nItems:")
     if data.items then
         local itemCount = 0
         local processedCount = 0
@@ -242,41 +227,41 @@ local function TestTSMImport(importString)
                     local silverValue = marketValue and math.floor((marketValue % 10000) / 100) or 0
                     local copperValue = marketValue and (marketValue % 100) or 0
                     
-                    print(string.format("  - %s (%s)", itemInfo.link or itemId, groupPath))
-                    print(string.format("    Market Value: %dg %ds %dc", goldValue, silverValue, copperValue))
-                    print(string.format("    Sale Rate: %.2f%%", (itemInfo.saleRate or 0) * 100))
+                    -- print(string.format("  - %s (%s)", itemInfo.link or itemId, groupPath))
+                    -- print(string.format("    Market Value: %dg %ds %dc", goldValue, silverValue, copperValue))
+                    -- print(string.format("    Sale Rate: %.2f%%", (itemInfo.saleRate or 0) * 100))
                     
                     -- If this is the last item, print summary
                     if processedCount == itemCount then
-                        print(string.format("\nProcessed %d items", processedCount))
+                        -- print(string.format("\nProcessed %d items", processedCount))
                     end
                 end)
             end
         end
     else
-        print("  No items found")
+        -- print("  No items found")
     end
 
     -- Print operations
-    print("\nOperations:")
+    -- print("\nOperations:")
     if data.groupOperations then
         for groupPath, modules in pairs(data.groupOperations) do
-            print("  Group: " .. groupPath)
+            -- print("  Group: " .. groupPath)
             for moduleName, operations in pairs(modules) do
-                print("    - Module: " .. moduleName)
+                -- print("    - Module: " .. moduleName)
                 for i, op in ipairs(operations) do
-                    print("      Operation " .. i .. ": " .. op)
+                    -- print("      Operation " .. i .. ": " .. op)
                 end
             end
         end
     else
-        print("  No operations found")
+        -- print("  No operations found")
     end
 
     -- Print raw data for debugging
-    print("\nRaw Data:")
+    -- print("\nRaw Data:")
     for k,v in pairs(data) do
-        print("  " .. k .. " = " .. type(v))
+        -- print("  " .. k .. " = " .. type(v))
     end
 
     return true, data
@@ -284,14 +269,11 @@ end
 
 -- Add this function before TestTSMImport
 local function ConvertToFliprFormat(tsmData)
-    print("Converting TSM data to Flipr format...")
-    
     local fliprData = {}
     
     -- Get the root group name from TSM data
     local rootGroup = tsmData.groupName
     if not rootGroup then
-        print("ERROR: No root group name found in TSM data")
         return nil
     end
     
@@ -366,7 +348,7 @@ local function ConvertToFliprFormat(tsmData)
         local totalItems = countGroupItems(group)
         
         -- Always show item count for debugging purposes
-        print(prefix .. group.name .. " (" .. totalItems .. " items)")
+        -- print(prefix .. group.name .. " (" .. totalItems .. " items)")
         
         -- Print children in sorted order
         local children = {}
@@ -380,19 +362,17 @@ local function ConvertToFliprFormat(tsmData)
         end
     end
     
-    print("\nConverted group structure:")
+    -- print("\nConverted group structure:")
     printGroupStructure(fliprData[rootGroup])
-    print("\nTotal Flipr items:", totalFliprItems)
+    -- print("\nTotal Flipr items:", totalFliprItems)
     
     return fliprData
 end
 
--- Add this function after ConvertToFliprFormat
 local function SaveImportedGroup(fliprData)
     -- Get reference to FLIPR addon
     local FLIPR = LibStub("AceAddon-3.0"):GetAddon("Flipr")
     if not FLIPR then
-        print("Error: Could not find FLIPR addon")
         return false
     end
     
@@ -400,10 +380,10 @@ local function SaveImportedGroup(fliprData)
     for groupName, groupData in pairs(fliprData) do
         -- If group exists, remove it first
         if FLIPR.groupDB.groups[groupName] then
-            print("Updating existing group:", groupName)
+            -- print("Updating existing group:", groupName)
             FLIPR.groupDB.groups[groupName] = nil
         else
-            print("Adding new group:", groupName)
+            -- print("Adding new group:", groupName)
         end
         
         -- Save new group data

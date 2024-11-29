@@ -846,6 +846,27 @@ function FLIPR:CreateProfitableItemRow(flipOpportunity, results)
             row.selectionTexture:Show()
             row.defaultBg:Hide()
             FLIPR.selectedItem = row.itemData
+            
+            -- Add this section to initialize auction data
+            local rowData = FLIPR.itemRows[itemID]
+            if rowData and rowData.results and rowData.results[1] then
+                local initialAuction = rowData.results[1]
+                rowData.selectedAuctions = {initialAuction}
+                rowData.totalCost = initialAuction.minPrice * initialAuction.totalQuantity
+                rowData.totalQuantity = initialAuction.totalQuantity
+                
+                -- Update selectedItem with the same data
+                FLIPR.selectedItem.selectedAuctions = {initialAuction}
+                FLIPR.selectedItem.totalQuantity = initialAuction.totalQuantity
+                FLIPR.selectedItem.totalCost = initialAuction.minPrice * initialAuction.totalQuantity
+                FLIPR.selectedItem.auctions = rowData.results
+                
+                print("=== DEBUG: Initialized auction data on main row click ===")
+                print(string.format("Selected auction price: %s, qty: %d", 
+                    GetCoinTextureString(initialAuction.minPrice),
+                    initialAuction.totalQuantity
+                ))
+            end
         end
     end
     
@@ -870,10 +891,10 @@ function FLIPR:CreateProfitableItemRow(flipOpportunity, results)
     stockText:SetPoint("LEFT", priceText, "RIGHT", 10, 0)
     stockText:SetText(string.format("Inv:%d/%d", flipOpportunity.currentInventory, flipOpportunity.maxInventory))
     
-    -- Sale Rate text (just the decimal)
+    -- Sale Rate text (raw value from TSM)
     local saleRateText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     saleRateText:SetPoint("LEFT", stockText, "RIGHT", 10, 0)
-    saleRateText:SetText(string.format(".%d", math.floor(flipOpportunity.saleRate * 1000)))
+    saleRateText:SetText(string.format("%.3f", flipOpportunity.saleRate))  -- Force 3 decimal places
     
     -- Profit text with ROI
     local profitText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")

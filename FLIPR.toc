@@ -4,6 +4,7 @@
 ## Author: YourName
 ## Version: 0.069
 ## SavedVariables: FliprDB
+## Dependencies: TradeSkillMaster_AppHelper
 
 # Libraries
 Libs\LibStub\LibStub.lua
@@ -19,6 +20,7 @@ Libs\Ace3\AceSerializer-3.0\AceSerializer-3.0.xml
 DataTables.lua
 
 # Core files
+Parser.lua
 Core.lua
 Database.lua
 GroupTest.lua

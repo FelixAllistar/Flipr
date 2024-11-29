@@ -572,19 +572,22 @@ function FLIPR:ProcessAuctionResults(results)
         return 
     end
     
+    -- Get sale rate for debug output
+    local saleRate = self:GetItemSaleRate(itemID)
+    
     -- Analyze flip opportunity
     local flipOpportunity = self:AnalyzeFlipOpportunity(results, itemID)
     if flipOpportunity then
         -- Debug print in green for profitable items
         print(string.format(
-            "|cFF00FF00Found flip for %s: Buy @ %s (x%d), Sell @ %s, Profit: %s, ROI: %d%%, Sale Rate: %.1f%%|r",
+            "|cFF00FF00Found flip for %s: Buy @ %s (x%d), Sell @ %s, Profit: %s, ROI: %d%%, Sale Rate: %s|r",
             itemName,
             GetCoinTextureString(flipOpportunity.avgBuyPrice),
             flipOpportunity.buyQuantity,
             GetCoinTextureString(flipOpportunity.sellPrice),
             GetCoinTextureString(flipOpportunity.totalProfit),
             flipOpportunity.roi,
-            itemData.saleRate * 100
+            tostring(saleRate)
         ))
         
         -- Create UI row for profitable item using UI function
@@ -592,9 +595,9 @@ function FLIPR:ProcessAuctionResults(results)
     else
         -- Debug print in yellow for unprofitable items
         print(string.format(
-            "|cFFFFFF00No profitable flip found for %s (Sale Rate: %.1f%%)|r",
+            "|cFFFFFF00No profitable flip found for %s (Sale Rate: %s)|r",
             itemName,
-            itemData.saleRate * 100
+            tostring(saleRate)
         ))
     end
 end
@@ -620,7 +623,24 @@ function FLIPR:ClearScanSelections()
     self.selectedItem = nil
 end
 
-function FLIPR:GetMaxInventoryForSaleRate(saleRate)
+function FLIPR:GetItemSaleRate(itemID)
+    -- Convert to TSM item string format
+    local itemString = TSM_API.ToItemString("i:" .. itemID)
+    if not itemString then return 0 end
+    
+    -- Get sale rate and convert from TSM's format
+    local saleRate = TSM_API.GetCustomPriceValue("DBRegionSaleRate*1000", itemString)
+    if not saleRate then return 0 end
+    
+    saleRate = tonumber(saleRate)
+    if not saleRate then return 0 end
+    
+    return saleRate/1000
+end
+
+function FLIPR:GetMaxInventoryForSaleRate(itemID)
+    local saleRate = self:GetItemSaleRate(itemID)
+    
     if saleRate >= 0.4 then
         return 100  -- High sale rate (40%+) - can hold up to 100
     elseif saleRate >= 0.2 then
@@ -651,23 +671,51 @@ function FLIPR:GetCurrentInventory(itemID)
     return inventoryCount + auctionCount
 end
 
+function FLIPR:CalculateDeposit(itemID, duration, quantity, isCommodity)
+    -- Default duration is 12 hours (1) if not specified
+    duration = duration or 1
+    
+    -- Ensure itemID is a number
+    itemID = tonumber(itemID)
+    if not itemID then return 0 end
+    
+    if isCommodity then
+        return C_AuctionHouse.CalculateCommodityDeposit(itemID, duration, quantity) or 0
+    else
+        -- For regular items, we need to create a temporary item
+        local item = Item:CreateFromItemID(itemID)
+        if item then
+            -- Need to wait for item to load
+            local deposit = 0
+            item:ContinueOnItemLoad(function()
+                deposit = C_AuctionHouse.CalculateItemDeposit(item, duration, quantity) or 0
+            end)
+            return deposit
+        end
+        return 0
+    end
+end
+
 function FLIPR:AnalyzeFlipOpportunity(results, itemID)
     -- Initial checks...
     local itemData = self.itemDB[itemID]
     if not itemData then return nil end
     
-    -- Get inventory limits first
-    local maxInventory = self:GetMaxInventoryForSaleRate(itemData.saleRate)
+    -- Get inventory limits using direct TSM sale rate
+    local maxInventory = self:GetMaxInventoryForSaleRate(itemID)
     local currentInventory = self:GetCurrentInventory(itemID)
     local roomForMore = maxInventory - currentInventory
     
+    -- Get current sale rate for debug output
+    local saleRate = self:GetItemSaleRate(itemID)
+    
     if roomForMore <= 0 then
         print(string.format(
-            "|cFFFF0000Skipping %s - Already have %d/%d (Sale Rate: %.1f%%)|r",
+            "|cFFFF0000Skipping %s - Already have %d/%d (Sale Rate: %s)|r",
             GetItemInfo(itemID) or itemID,
             currentInventory,
             maxInventory,
-            itemData.saleRate * 100
+            tostring(saleRate)
         ))
         return nil
     end
@@ -683,15 +731,24 @@ function FLIPR:AnalyzeFlipOpportunity(results, itemID)
         return nil
     end
     
+    -- Determine if item is a commodity
+    local itemKey = C_AuctionHouse.MakeItemKey(itemID)
+    local itemInfo = C_AuctionHouse.GetItemKeyInfo(itemKey)
+    local isCommodity = itemInfo and itemInfo.isCommodity or false
+    
     -- Find profitable auctions
     local profitableAuctions = {}
-    local currentPrice = results[1].minPrice
-    local deposit = 0  -- TODO: Calculate actual deposit
     local ahCut = 0.05  -- 5% AH fee
     
     for i = 1, #results-1 do
         local buyPrice = results[i].minPrice
         local nextPrice = results[i+1].minPrice
+        local quantity = results[i].totalQuantity
+        
+        -- Calculate deposit for posting duration (12 hours = 1, 24 hours = 2, 48 hours = 3)
+        local deposit = self:CalculateDeposit(itemID, 1, quantity, isCommodity)
+        
+        -- Calculate potential profit including deposit cost
         local potentialProfit = (nextPrice * (1 - ahCut)) - (buyPrice + deposit)
         
         if potentialProfit > 0 then
@@ -699,8 +756,9 @@ function FLIPR:AnalyzeFlipOpportunity(results, itemID)
                 index = i,
                 buyPrice = buyPrice,
                 sellPrice = nextPrice,
-                quantity = results[i].totalQuantity,
-                profit = potentialProfit
+                quantity = quantity,
+                profit = potentialProfit,
+                deposit = deposit
             })
         else
             -- Stop looking once we find unprofitable price points
@@ -716,32 +774,35 @@ function FLIPR:AnalyzeFlipOpportunity(results, itemID)
     local bestDeal = profitableAuctions[1]
     local buyQuantity = math.min(roomForMore, bestDeal.quantity)
     
-    -- Debug output
+    -- Debug output with deposit info
     print(string.format(
         "Analysis for %s:\n" ..
         "- Buy price: %s\n" ..
         "- Sell price: %s\n" ..
+        "- Deposit cost: %s\n" ..
         "- Profit per item: %s\n" ..
         "- Can buy: %d/%d",
         GetItemInfo(itemID) or itemID,
         GetCoinTextureString(bestDeal.buyPrice),
         GetCoinTextureString(bestDeal.sellPrice),
+        GetCoinTextureString(bestDeal.deposit),
         GetCoinTextureString(bestDeal.profit),
         buyQuantity,
         bestDeal.quantity
     ))
     
     return {
-        numAuctions = 1,  -- We're only buying from one price point at a time
+        numAuctions = 1,
         buyQuantity = buyQuantity,
         avgBuyPrice = bestDeal.buyPrice,
         sellPrice = bestDeal.sellPrice,
+        deposit = bestDeal.deposit,
         totalProfit = bestDeal.profit * buyQuantity,
         profitPerItem = bestDeal.profit,
         roi = (bestDeal.profit / bestDeal.buyPrice) * 100,
         currentInventory = currentInventory,
         maxInventory = maxInventory,
-        saleRate = itemData.saleRate,
+        saleRate = saleRate,
         totalAvailable = bestDeal.quantity
     }
 end
