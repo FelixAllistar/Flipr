@@ -57,13 +57,13 @@ function FLIPR:LoadAllItems(groupData)
 end
 
 function FLIPR:LoadGroupData(groupData, groupPath)
-    print("Loading group data for path:", groupPath)
+    print("Loading group data with path:", groupPath)
     local items = {}
     local addedItems = {} -- Track which items we've already added
     
     -- Function to recursively collect items from a node and its children
-    local function collectItems(node)
-        -- Add items from this level
+    local function collectItemsRecursively(node)
+        -- Get items from current level
         if node.items then
             for itemId, itemData in pairs(node.items) do
                 if not addedItems[itemId] then
@@ -74,12 +74,10 @@ function FLIPR:LoadGroupData(groupData, groupPath)
             end
         end
         
-        -- Recursively add items from children
-        if type(node) == "table" then
-            for key, value in pairs(node) do
-                if type(value) == "table" and key ~= "items" and key ~= "name" then
-                    collectItems(value)
-                end
+        -- Get items from all children recursively
+        if node.children then
+            for _, childNode in pairs(node.children) do
+                collectItemsRecursively(childNode)
             end
         end
     end
@@ -101,16 +99,11 @@ function FLIPR:LoadGroupData(groupData, groupPath)
                 print("  Matched root group name:", part)
             end
         else
-            -- For subgroups, look for them directly in the current node
-            for key, value in pairs(currentNode) do
-                if type(value) == "table" then
-                    if key ~= "items" and value.name == part then
-                        currentNode = value
-                        found = true
-                        print("  Found subgroup:", part)
-                        break
-                    end
-                end
+            -- For subgroups, look for them in the children table
+            if currentNode.children and currentNode.children[part] then
+                currentNode = currentNode.children[part]
+                found = true
+                print("  Found subgroup in children:", part)
             end
         end
         
@@ -120,13 +113,13 @@ function FLIPR:LoadGroupData(groupData, groupPath)
         end
     end
     
-    -- Found the group, collect all items from it and its children
-    print("Found target group, collecting items")
-    collectItems(currentNode)
+    -- Found the target group, collect all items from it and its children recursively
+    print("Found target group, collecting items recursively")
+    collectItemsRecursively(currentNode)
     
     local count = 0
     for _ in pairs(items) do count = count + 1 end
-    print(string.format("Found %d unique items in group: %s", count, groupPath))
+    print(string.format("Found %d unique items in group and subgroups: %s", count, groupPath))
     
     return items
 end

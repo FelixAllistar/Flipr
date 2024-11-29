@@ -3,7 +3,7 @@
 ## Notes: Auction House Flipping Helper
 ## Author: YourName
 ## Version: 0.069
-## SavedVariables: FliprDB
+## SavedVariables: FliprDB, FliprSettings
 ## Dependencies: TradeSkillMaster_AppHelper
 
 # Libraries
@@ -15,6 +15,7 @@ Libs\LibDeflate\LibDeflate.lua
 Libs\LibSerialize\LibSerialize.lua
 Libs\LibSerialize\lib.xml
 Libs\Ace3\AceSerializer-3.0\AceSerializer-3.0.xml
+Libs\AceConsole-3.0\AceConsole-3.0.xml
 
 # Data Tables
 DataTables.lua
@@ -27,3 +28,4 @@ GroupTest.lua
 UI.lua
 Scanner.lua
 Purchase.lua
+Options.lua

@@ -393,11 +393,12 @@ function FLIPR:RefreshGroupList()
 end
 
 function FLIPR:CreateGroupCheckbox(parent, text, groupPath, level)
-    print(string.format("Creating checkbox for: %s (path: %s, level: %d)", text, groupPath, level))
-    
     -- Create container frame for checkbox and expand button
     local container = CreateFrame("Frame", nil, parent)
     container:SetSize(parent:GetWidth(), 20)
+    
+    -- Increase indentation (change 20 to a larger number for more indent)
+    local INDENT_WIDTH = 30  -- Was 20 before, increased to 30
     
     -- Create expand button first if needed
     local expandButton
@@ -417,17 +418,13 @@ function FLIPR:CreateGroupCheckbox(parent, text, groupPath, level)
             end
         end
         
-        if not currentNode then
-            print(string.format("ERROR: Could not find root group: %s", parts[1]))
-            return nil
-        end
+        if not currentNode then return nil end
         
         -- Navigate through children
         for i = 2, #parts do
             if currentNode.children and currentNode.children[parts[i]] then
                 currentNode = currentNode.children[parts[i]]
             else
-                print(string.format("ERROR: Could not find child: %s", parts[i]))
                 return nil
             end
         end
@@ -436,21 +433,18 @@ function FLIPR:CreateGroupCheckbox(parent, text, groupPath, level)
     end
     
     local node = findNode(groupPath)
-    print(string.format("Found node for path %s: %s", groupPath, node and "yes" or "no"))
     
     -- Create expand button if the node has children
     if node and node.children and next(node.children) then
-        print(string.format("  Creating expand button for %s (has children)", text))
         expandButton = CreateFrame("Button", nil, container)
         expandButton:SetSize(16, 16)
-        expandButton:SetPoint("LEFT", container, "LEFT", 20 * level, 0)
+        expandButton:SetPoint("LEFT", container, "LEFT", INDENT_WIDTH * level, 0)
         
         -- Set texture based on state
         local isExpanded = self.db.expandedGroups[groupPath]
         expandButton:SetNormalTexture(isExpanded and "Interface\\Buttons\\UI-MinusButton-Up" or "Interface\\Buttons\\UI-PlusButton-Up")
         
         expandButton:SetScript("OnClick", function()
-            print(string.format("Expand button clicked for: %s", groupPath))
             self.db.expandedGroups[groupPath] = not self.db.expandedGroups[groupPath]
             self:RefreshGroupList()
         end)
@@ -461,21 +455,64 @@ function FLIPR:CreateGroupCheckbox(parent, text, groupPath, level)
     if expandButton then
         checkbox:SetPoint("LEFT", expandButton, "RIGHT", 2, 0)
     else
-        checkbox:SetPoint("LEFT", container, "LEFT", 20 * level, 0)
+        checkbox:SetPoint("LEFT", container, "LEFT", INDENT_WIDTH * level, 0)
     end
     checkbox.Text:SetText(text)
     
     -- Set initial state
     checkbox:SetChecked(self.db.enabledGroups[groupPath] or false)
     
-    -- Checkbox click handler
+    -- Enhanced checkbox click handler for root group behavior
     checkbox:SetScript("OnClick", function()
         local checked = checkbox:GetChecked()
-        print(string.format("Checkbox clicked: %s = %s", groupPath, checked and "true" or "false"))
-        self:ToggleGroupState(groupPath, checked)
+        
+        -- If this is a root group (level == 0), toggle all children
+        if level == 0 then
+            self:ToggleAllChildren(groupPath, checked)
+        else
+            -- Normal behavior for non-root groups
+            self:ToggleGroupState(groupPath, checked)
+        end
     end)
     
     return container, expandButton
+end
+
+-- Add this new function to handle toggling all children
+function FLIPR:ToggleAllChildren(rootPath, state)
+    print(string.format("Toggling all children of %s to %s", rootPath, state and "enabled" or "disabled"))
+    
+    -- First toggle the root group itself
+    self.db.enabledGroups[rootPath] = state
+    
+    -- Find the root node
+    local rootNode = nil
+    for groupName, groupData in pairs(self.availableGroups) do
+        if groupData.name == rootPath then
+            rootNode = groupData
+            break
+        end
+    end
+    
+    if not rootNode then return end
+    
+    -- Helper function to recursively toggle groups
+    local function toggleChildren(node, parentPath)
+        if node.children then
+            for childName, childNode in pairs(node.children) do
+                local childPath = parentPath .. "/" .. childName
+                self.db.enabledGroups[childPath] = state
+                toggleChildren(childNode, childPath)
+            end
+        end
+    end
+    
+    -- Toggle all children
+    toggleChildren(rootNode, rootPath)
+    
+    -- Refresh the database and UI
+    self:InitializeDB()
+    self:RefreshGroupList()
 end
 
 function FLIPR:ToggleGroupState(groupPath, checked)

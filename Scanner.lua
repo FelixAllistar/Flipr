@@ -598,6 +598,7 @@ function FLIPR:ProcessAuctionResults(results)
             "|cFFFFFF00No profitable flip found for %s (Sale Rate: %s)|r",
             itemName,
             tostring(saleRate)
+            
         ))
     end
 end
@@ -641,12 +642,12 @@ end
 function FLIPR:GetMaxInventoryForSaleRate(itemID)
     local saleRate = self:GetItemSaleRate(itemID)
     
-    if saleRate >= 0.4 then
-        return 100  -- High sale rate (40%+) - can hold up to 100
-    elseif saleRate >= 0.2 then
-        return 10   -- Medium sale rate (20-39%) - can hold up to 10
+    if saleRate >= self.db.highSaleRate then
+        return self.db.highInventory
+    elseif saleRate >= self.db.mediumSaleRate then
+        return self.db.mediumInventory
     else
-        return 5    -- Low sale rate (<20%) - only hold 5 max
+        return self.db.lowInventory
     end
 end
 
