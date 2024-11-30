@@ -1063,30 +1063,32 @@ function FLIPR:CreateProfitableItemRow(flipOpportunity, results)
 end
 
 function FLIPR:UpdateRowPositions()
-    -- Reset any expanded state if scan is complete
+    -- Reset expanded state if scan complete
     if not self.isScanning then
         self:CollapseDropdown()
     end
 
-    -- Sort rows by index
+    -- Create sorted array of rows
     local sortedRows = {}
     for id, rowData in pairs(self.itemRows) do
         table.insert(sortedRows, {id = id, data = rowData})
     end
+    
+    -- Sort by index
     table.sort(sortedRows, function(a, b)
         return a.data.rowIndex < b.data.rowIndex
     end)
 
-    -- Calculate positions based on sorted order
+    -- Position rows sequentially
     local yOffset = 0
     for _, rowInfo in ipairs(sortedRows) do
         local rowData = rowInfo.data
-        if rowData.frame then
+        if rowData.frame and rowData.frame:IsShown() then
             rowData.frame:ClearAllPoints()
             rowData.frame:SetPoint("TOPLEFT", self.scrollChild, "TOPLEFT", 0, -yOffset)
             rowData.frame:SetPoint("TOPRIGHT", self.scrollChild, "TOPRIGHT", 0, -yOffset)
             
-            -- Add dropdown height if this is the expanded row
+            -- Add dropdown height if expanded
             if self.expandedItemID == rowInfo.id then
                 local dropdownHeight = math.min(#rowData.results, MAX_DROPDOWN_ROWS) * ROW_HEIGHT
                 yOffset = yOffset + dropdownHeight + DROPDOWN_PADDING
@@ -1373,17 +1375,27 @@ function FLIPR:RemoveItemRowAndUpdate(itemID)
     -- Collapse any expanded dropdown
     self:CollapseDropdown()
     
-    -- Reindex remaining rows
-    local currentIndex = 1
-    for _, remainingRow in pairs(self.itemRows) do
-        remainingRow.rowIndex = currentIndex
-        if remainingRow.frame then
-            remainingRow.frame.rowIndex = currentIndex
+    -- Create sorted array of remaining rows
+    local sortedRows = {}
+    for id, row in pairs(self.itemRows) do
+        table.insert(sortedRows, {id = id, data = row})
+    end
+    
+    -- Sort by current index
+    table.sort(sortedRows, function(a, b)
+        return a.data.rowIndex < b.data.rowIndex
+    end)
+    
+    -- Reindex sequentially without gaps
+    for i, rowInfo in ipairs(sortedRows) do
+        local row = rowInfo.data
+        row.rowIndex = i
+        if row.frame then
+            row.frame.rowIndex = i
         end
-        currentIndex = currentIndex + 1
     end
     
     -- Update positions of remaining rows
-    self:UpdateRowPositions()  -- Make sure this is called
+    self:UpdateRowPositions()
 end
  
