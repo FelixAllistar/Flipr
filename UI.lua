@@ -457,7 +457,27 @@ function FLIPR:CreateGroupCheckbox(parent, text, groupPath, level)
     else
         checkbox:SetPoint("LEFT", container, "LEFT", INDENT_WIDTH * level, 0)
     end
+
+    -- Create custom text with smaller font and ellipsis
+    checkbox.Text:SetFontObject("GameFontNormalSmall")  -- Smaller font
+    checkbox.Text:SetPoint("LEFT", checkbox, "RIGHT", 0, 0)
+    checkbox.Text:SetPoint("RIGHT", container, "RIGHT", -5, 0)  -- Right margin
     checkbox.Text:SetText(text)
+    checkbox.Text:SetWordWrap(false)  -- Prevent wrapping
+    checkbox.Text:SetJustifyH("LEFT")  -- Left align
+    checkbox.Text:SetHeight(20)
+
+    -- Add tooltip for full text
+    checkbox:SetScript("OnEnter", function()
+        if checkbox.Text:IsTruncated() then
+            GameTooltip:SetOwner(checkbox, "ANCHOR_RIGHT")
+            GameTooltip:SetText(text)
+            GameTooltip:Show()
+        end
+    end)
+    checkbox:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
     
     -- Set initial state
     checkbox:SetChecked(self.db.enabledGroups[groupPath] or false)
