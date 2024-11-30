@@ -403,7 +403,35 @@ local function SaveImportedGroup(fliprData)
     return true
 end
 
--- Make functions available globally
+-- Add this new combined function
+local function ImportTSMGroup(importString)
+    -- Step 1: Import and test TSM data
+    local success, tsmData = TestTSMImport(importString)
+    if not success then
+        print("Failed to import TSM group")
+        return false
+    end
+    
+    -- Step 2: Convert to Flipr format
+    local fliprData = ConvertToFliprFormat(tsmData)
+    if not fliprData then
+        print("Failed to convert TSM data to Flipr format")
+        return false
+    end
+    
+    -- Step 3: Save the group
+    if not SaveImportedGroup(fliprData) then
+        print("Failed to save imported group")
+        return false
+    end
+    
+    return true
+end
+
+-- Make the new function available globally
+_G.ImportTSMGroup = ImportTSMGroup
+
+-- Keep these existing global exports as they might be used elsewhere
 _G.TestTSMImport = TestTSMImport
 _G.ConvertToFliprFormat = ConvertToFliprFormat
 _G.SaveImportedGroup = SaveImportedGroup
