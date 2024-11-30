@@ -385,6 +385,23 @@ local function SaveImportedGroup(fliprData)
         
         -- Save new group data
         FLIPR.groupDB.groups[groupName] = groupData
+        
+        -- Enable the root group
+        FLIPR.db.enabledGroups[groupName] = true
+        
+        -- Helper function to recursively enable all groups
+        local function enableAllGroups(node, parentPath)
+            if node.children then
+                for childName, childNode in pairs(node.children) do
+                    local childPath = parentPath .. "/" .. childName
+                    FLIPR.db.enabledGroups[childPath] = true
+                    enableAllGroups(childNode, childPath)
+                end
+            end
+        end
+        
+        -- Enable all child groups
+        enableAllGroups(groupData, groupName)
     end
     
     -- Rebuild everything
