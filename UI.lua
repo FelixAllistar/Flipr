@@ -340,6 +340,17 @@ function FLIPR:RefreshGroupList()
     
     local yOffset = -10
     
+    -- Create sorted array of root groups
+    local sortedGroups = {}
+    for groupName, structure in pairs(self.groupStructure) do
+        table.insert(sortedGroups, {name = groupName, data = structure})
+    end
+    
+    -- Sort alphabetically by group name
+    table.sort(sortedGroups, function(a, b)
+        return a.name < b.name
+    end)
+    
     -- Helper function to add groups recursively
     local function addGroups(node, prefix, level)
         if not node then 
@@ -378,11 +389,11 @@ function FLIPR:RefreshGroupList()
         return yOffset
     end
     
-    -- Add groups from saved variables
+    -- Process groups in sorted order
     print("Processing available groups:")
-    for groupName, structure in pairs(self.groupStructure) do
-        print(string.format("Processing root group: %s", groupName))
-        yOffset = addGroups(structure, nil, 0)
+    for _, groupInfo in ipairs(sortedGroups) do
+        print(string.format("Processing root group: %s", groupInfo.name))
+        yOffset = addGroups(groupInfo.data, nil, 0)
     end
     
     -- Update parent frame height
@@ -1063,10 +1074,10 @@ function FLIPR:CreateProfitableItemRow(flipOpportunity, results)
 end
 
 function FLIPR:UpdateRowPositions()
-    -- Reset expanded state if scan complete
-    if not self.isScanning then
-        self:CollapseDropdown()
-    end
+    -- Remove this condition entirely
+    -- if not self.isScanning then
+    --     self:CollapseDropdown()
+    -- end
 
     -- Create sorted array of rows
     local sortedRows = {}
@@ -1338,7 +1349,7 @@ function FLIPR:BuySelectedAuctions()
                 GetCoinTextureString(auction.minPrice),
                 auction.totalQuantity,
                 GetCoinTextureString(subtotal)
-            )
+            )  -- Add this closing parenthesis
         end
     end
     
