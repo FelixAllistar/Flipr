@@ -262,8 +262,8 @@ function FLIPR:ScanNextItem()
         print(string.format("|cFFFFFFFFScanning item %d/%d: %s (%d)|r", 
             self.currentScanIndex, #self.itemIDs, itemData.name, itemID))
 
-        -- Wait for throttle with a longer timeout
-        if not C_AuctionHouse.IsThrottledMessageSystemReady() then
+        -- Check if we're throttled from scanning (not from purchasing)
+        if not C_AuctionHouse.IsThrottledMessageSystemReady() and not self.isPurchaseThrottled then
             local itemID = self.itemIDs[self.currentScanIndex]
             local itemInfo = itemID and C_AuctionHouse.GetItemKeyInfo(C_AuctionHouse.MakeItemKey(itemID))
             

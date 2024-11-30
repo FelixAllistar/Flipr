@@ -91,6 +91,42 @@ function FLIPR:CreateBuyConfirmationFrame()
     cancelButton:SetPoint("BOTTOMLEFT", 20, 20)
     cancelButton:SetText("Cancel")
     
+    buyButton:SetScript("OnClick", function()
+        if not self.selectedItem then return end
+        
+        local itemID = self.selectedItem.itemID
+        local isCommodity = self:IsCommodityItem(itemID)
+        
+        self:StartPurchaseThrottle()
+        
+        if isCommodity then
+            local totalQty = 0
+            for _, auction in pairs(self.selectedItem.selectedAuctions) do
+                totalQty = totalQty + auction.totalQuantity
+            end
+            
+            C_AuctionHouse.StartCommoditiesPurchase(itemID, totalQty)
+            self:RegisterEvent("AUCTION_HOUSE_THROTTLED_SYSTEM_READY", function()
+                C_AuctionHouse.ConfirmCommoditiesPurchase(itemID, totalQty)
+                self:UnregisterEvent("AUCTION_HOUSE_THROTTLED_SYSTEM_READY")
+                self:EndPurchaseThrottle()
+            end)
+        else
+            for _, auction in pairs(self.selectedItem.selectedAuctions) do
+                C_AuctionHouse.PlaceBid(auction.auctionID, auction.minPrice * auction.totalQuantity)
+            end
+            C_Timer.After(0.5, function()
+                self:EndPurchaseThrottle()
+            end)
+        end
+        
+        frame:Hide()
+    end)
+    
+    cancelButton:SetScript("OnClick", function() 
+        frame:Hide() 
+    end)
+    
     frame.UpdateDisplay = function(self, itemData)
         if not itemData then return end
         
@@ -124,55 +160,6 @@ function FLIPR:CreateBuyConfirmationFrame()
         self.totalText:SetText(string.format("Total: %s", GetCoinTextureString(totalCost)))
     end
     
-    buyButton:SetScript("OnClick", function()
-        if not self.selectedItem then return end
-        
-        print("=== DEBUG: Buy Button Clicked ===")
-        print("Selected Item:", self.selectedItem.itemID)
-        if self.selectedItem.selectedAuctions then
-            print("Selected Auctions:", #self.selectedItem.selectedAuctions)
-            for i, auction in pairs(self.selectedItem.selectedAuctions) do
-                print(string.format("  [%d] price: %s, qty: %d", 
-                    i, 
-                    GetCoinTextureString(auction.minPrice), 
-                    auction.totalQuantity
-                ))
-            end
-        else
-            print("No selectedAuctions found!")
-            print("Available keys in selectedItem:")
-            for k,v in pairs(self.selectedItem) do
-                print("  Has key:", k)
-            end
-        end
-        
-        local itemID = self.selectedItem.itemID
-        local isCommodity = self:IsCommodityItem(itemID)
-        
-        if isCommodity then
-            local totalQty = 0
-            for _, auction in pairs(self.selectedItem.selectedAuctions) do
-                totalQty = totalQty + auction.totalQuantity
-            end
-            
-            C_AuctionHouse.StartCommoditiesPurchase(itemID, totalQty)
-            self:RegisterEvent("AUCTION_HOUSE_THROTTLED_SYSTEM_READY", function()
-                C_AuctionHouse.ConfirmCommoditiesPurchase(itemID, totalQty)
-                self:UnregisterEvent("AUCTION_HOUSE_THROTTLED_SYSTEM_READY")
-            end)
-        else
-            for _, auction in pairs(self.selectedItem.selectedAuctions) do
-                C_AuctionHouse.PlaceBid(auction.auctionID, auction.minPrice * auction.totalQuantity)
-            end
-        end
-        
-        frame:Hide()
-    end)
-    
-    cancelButton:SetScript("OnClick", function() 
-        frame:Hide() 
-    end)
-    
     frame:Hide()
     return frame
 end
@@ -189,4 +176,12 @@ function FLIPR:BuySelectedAuctions()
     
     self.buyConfirmFrame:UpdateDisplay(self.selectedItem)
     self.buyConfirmFrame:Show()
+end
+
+function FLIPR:StartPurchaseThrottle()
+    self.isPurchaseThrottled = true
+end
+
+function FLIPR:EndPurchaseThrottle()
+    self.isPurchaseThrottled = false
 end 
