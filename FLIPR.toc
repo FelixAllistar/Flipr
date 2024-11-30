@@ -17,8 +17,7 @@ Libs\LibSerialize\lib.xml
 Libs\Ace3\AceSerializer-3.0\AceSerializer-3.0.xml
 Libs\AceConsole-3.0\AceConsole-3.0.xml
 
-# Data Tables
-DataTables.lua
+
 
 # Core files
 Parser.lua

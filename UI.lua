@@ -924,14 +924,21 @@ function FLIPR:CreateProfitableItemRow(flipOpportunity, results)
         allAuctions = results
     }
     
-    -- Store in our itemRows table
+    -- First store the new item with index 1
     self.itemRows[itemID] = {
         frame = rowContainer,
         row = row,
-        rowIndex = self.profitableItemCount,
+        rowIndex = 1,  -- Always set new item to index 1
         results = results,
         flipOpportunity = flipOpportunity
     }
+    
+    -- Then shift all other items down
+    for existingID, existingRow in pairs(self.itemRows) do
+        if existingID ~= itemID then  -- Don't shift the new item
+            existingRow.rowIndex = existingRow.rowIndex + 1
+        end
+    end
     
     -- Create item object
     local item = Item:CreateFromItemID(itemID)
@@ -1045,34 +1052,52 @@ function FLIPR:CreateProfitableItemRow(flipOpportunity, results)
     ))
     
     -- Initial position
-    self:UpdateRowPositions()
+    if self.expandedItemID then
+        local currentExpanded = self.expandedItemID
+        self:CollapseDropdown()
+        self:UpdateRowPositions()
+        self:ExpandDropdown(currentExpanded)
+    else
+        self:UpdateRowPositions()
+    end
 end
 
 function FLIPR:UpdateRowPositions()
-    local expandedIndex = self.expandedItemID and self.itemRows[self.expandedItemID].rowIndex or 0
-    local expandedRowData = self.expandedItemID and self.itemRows[self.expandedItemID]
-    local dropdownHeight = expandedRowData and (math.min(#expandedRowData.results, MAX_DROPDOWN_ROWS) * ROW_HEIGHT) or 0
-    
-    -- Update positions for all rows
+    -- Reset any expanded state if scan is complete
+    if not self.isScanning then
+        self:CollapseDropdown()
+    end
+
+    -- Sort rows by index
+    local sortedRows = {}
     for id, rowData in pairs(self.itemRows) do
-        local yOffset = (rowData.rowIndex - 1) * ROW_HEIGHT
-        
-        -- If this row is below an expanded row, add dropdown height
-        if expandedIndex > 0 and rowData.rowIndex > expandedIndex then
-            yOffset = yOffset + dropdownHeight + DROPDOWN_PADDING
+        table.insert(sortedRows, {id = id, data = rowData})
+    end
+    table.sort(sortedRows, function(a, b)
+        return a.data.rowIndex < b.data.rowIndex
+    end)
+
+    -- Calculate positions based on sorted order
+    local yOffset = 0
+    for _, rowInfo in ipairs(sortedRows) do
+        local rowData = rowInfo.data
+        if rowData.frame then
+            rowData.frame:ClearAllPoints()
+            rowData.frame:SetPoint("TOPLEFT", self.scrollChild, "TOPLEFT", 0, -yOffset)
+            rowData.frame:SetPoint("TOPRIGHT", self.scrollChild, "TOPRIGHT", 0, -yOffset)
+            
+            -- Add dropdown height if this is the expanded row
+            if self.expandedItemID == rowInfo.id then
+                local dropdownHeight = math.min(#rowData.results, MAX_DROPDOWN_ROWS) * ROW_HEIGHT
+                yOffset = yOffset + dropdownHeight + DROPDOWN_PADDING
+            end
+            
+            yOffset = yOffset + ROW_HEIGHT
         end
-        
-        rowData.frame:ClearAllPoints()
-        rowData.frame:SetPoint("TOPLEFT", self.scrollChild, "TOPLEFT", 0, -yOffset)
-        rowData.frame:SetPoint("TOPRIGHT", self.scrollChild, "TOPRIGHT", 0, -yOffset)
     end
-    
+
     -- Update scroll child height
-    local totalHeight = (self.profitableItemCount * ROW_HEIGHT)
-    if self.expandedItemID then
-        totalHeight = totalHeight + dropdownHeight + DROPDOWN_PADDING
-    end
-    self.scrollChild:SetHeight(math.max(1, totalHeight))
+    self.scrollChild:SetHeight(math.max(1, yOffset))
 end
 
 function FLIPR:CollapseDropdown()
@@ -1359,6 +1384,6 @@ function FLIPR:RemoveItemRowAndUpdate(itemID)
     end
     
     -- Update positions of remaining rows
-    self:UpdateRowPositions()
+    self:UpdateRowPositions()  -- Make sure this is called
 end
  
