@@ -397,6 +397,9 @@ function FLIPR:CreateGroupCheckbox(parent, text, groupPath, level)
     local container = CreateFrame("Frame", nil, parent)
     container:SetSize(parent:GetWidth(), 20)
     
+    -- Store the groupPath on the container for later reference
+    container.groupPath = groupPath
+    
     -- Increase indentation (change 20 to a larger number for more indent)
     local INDENT_WIDTH = 30  -- Was 20 before, increased to 30
     
@@ -494,6 +497,106 @@ function FLIPR:CreateGroupCheckbox(parent, text, groupPath, level)
             self:ToggleGroupState(groupPath, checked)
         end
     end)
+    
+    -- Add delete button for root level groups
+    if level == 0 then
+        local deleteBtn = CreateFrame("Button", nil, container)
+        deleteBtn:SetSize(16, 16)
+        deleteBtn:SetPoint("RIGHT", container, "RIGHT", -5, 0)
+        
+        -- Raise the button's frame level above the container
+        deleteBtn:SetFrameLevel(container:GetFrameLevel() + 2)
+        
+        -- Set the X texture
+        deleteBtn:SetNormalTexture("Interface\\Buttons\\UI-StopButton")
+        
+        -- Add hover effect
+        deleteBtn:SetHighlightTexture("Interface\\Buttons\\UI-StopButton", "ADD")
+        
+        -- Make the button more visible and clickable
+        deleteBtn:EnableMouse(true)
+        
+        -- Click handler with confirmation dialog
+        deleteBtn:SetScript("OnClick", function()
+            -- Create confirmation dialog if it doesn't exist
+            if not StaticPopupDialogs["FLIPR_CONFIRM_DELETE_GROUP"] then
+                StaticPopupDialogs["FLIPR_CONFIRM_DELETE_GROUP"] = {
+                    text = "Delete group '%s'?",
+                    button1 = "Yes",
+                    button2 = "No",
+                    timeout = 0,
+                    whileDead = true,
+                    hideOnEscape = true,
+                    preferredIndex = 3,
+                    OnAccept = function(self, data)
+                        -- Remove from saved variables
+                        if self.FLIPR.groupDB.groups[data.groupPath] then
+                            self.FLIPR.groupDB.groups[data.groupPath] = nil
+                        end
+
+                        -- Remove from group structure
+                        if self.FLIPR.groupStructure[data.groupPath] then
+                            self.FLIPR.groupStructure[data.groupPath] = nil
+                        end
+
+                        -- Get all frames in the scroll child
+                        local scrollChild = self.FLIPR.groupFrame
+                        if scrollChild then
+                            -- Find and remove the specific root group frame
+                            for _, child in pairs({scrollChild:GetChildren()}) do
+                                -- Check if this is our root group frame
+                                if child.groupPath == data.groupPath then
+                                    -- Hide and cleanup all children of this frame
+                                    for _, subChild in pairs({child:GetChildren()}) do
+                                        subChild:Hide()
+                                        subChild:SetParent(nil)
+                                        subChild = nil
+                                    end
+                                    -- Hide and cleanup the root frame itself
+                                    child:Hide()
+                                    child:SetParent(nil)
+                                    child:ClearAllPoints()
+                                    child = nil
+                                end
+                            end
+                        end
+
+                        -- Clear any expanded states for this group
+                        if self.FLIPR.db.expandedGroups then
+                            self.FLIPR.db.expandedGroups[data.groupPath] = nil
+                        end
+
+                        -- Clear any enabled states for this group
+                        if self.FLIPR.db.enabledGroups then
+                            self.FLIPR.db.enabledGroups[data.groupPath] = nil
+                        end
+
+                        -- Rebuild group structure from current saved variables
+                        self.FLIPR.availableGroups = self.FLIPR:GetAvailableGroups()
+                        self.FLIPR.groupStructure = {}
+                        for groupName, groupData in pairs(self.FLIPR.availableGroups) do
+                            self.FLIPR.groupStructure[groupName] = self.FLIPR:BuildGroupStructure(groupData)
+                        end
+
+                        -- Refresh UI to rebuild the group list
+                        self.FLIPR:RefreshGroupList()
+                    end,
+                }
+            end
+            
+            -- Show the confirmation dialog
+            local dialog = StaticPopup_Show("FLIPR_CONFIRM_DELETE_GROUP", text)
+            if dialog then
+                dialog.FLIPR = self
+                dialog.data = {
+                    groupPath = groupPath,
+                }
+            end
+        end)
+        
+        -- Adjust text width to make room for delete button
+        checkbox.Text:SetPoint("RIGHT", deleteBtn, "LEFT", -5, 0)
+    end
     
     return container, expandButton
 end
@@ -879,7 +982,7 @@ function FLIPR:CreateProfitableItemRow(flipOpportunity, results)
         -- Clear previous selection's visual state if it exists
         if FLIPR.selectedItem and FLIPR.itemRows[FLIPR.selectedItem.itemID] then
             local prevRowData = FLIPR.itemRows[FLIPR.selectedItem.itemID]
-            if prevRowData.row then
+            if prevRowData then
                 print("Clearing previous selection:", FLIPR.selectedItem.itemID)
                 prevRowData.row.selectionTexture:Hide()
                 prevRowData.row.defaultBg:Show()

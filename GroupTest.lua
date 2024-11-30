@@ -380,17 +380,22 @@ local function SaveImportedGroup(fliprData)
     for groupName, groupData in pairs(fliprData) do
         -- If group exists, remove it first
         if FLIPR.groupDB.groups[groupName] then
-            -- print("Updating existing group:", groupName)
             FLIPR.groupDB.groups[groupName] = nil
-        else
-            -- print("Adding new group:", groupName)
         end
         
         -- Save new group data
         FLIPR.groupDB.groups[groupName] = groupData
     end
     
-    -- Trigger UI refresh if needed
+    -- Rebuild everything
+    FLIPR.availableGroups = FLIPR:GetAvailableGroups()
+    FLIPR.groupStructure = {}
+    for groupName, groupData in pairs(FLIPR.availableGroups) do
+        FLIPR.groupStructure[groupName] = FLIPR:BuildGroupStructure(groupData)
+    end
+    
+    -- Initialize database and refresh UI
+    FLIPR:InitializeDB()
     if FLIPR.RefreshGroupList then
         FLIPR:RefreshGroupList()
     end
