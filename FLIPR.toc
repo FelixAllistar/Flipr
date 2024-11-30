@@ -25,6 +25,7 @@ Core.lua
 Database.lua
 GroupTest.lua
 UI.lua
+Profitability.lua
 Scanner.lua
 Purchase.lua
 Options.lua
