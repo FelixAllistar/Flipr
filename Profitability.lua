@@ -1,23 +1,26 @@
 local addonName, addon = ...
 local FLIPR = addon.FLIPR
 
+function FLIPR:GetTSMValue(source, itemString, needsDecimalConversion)
+    local value = TSM_API.GetCustomPriceValue(source, itemString)
+    if not value then return 0 end
+    
+    -- Convert from TSM's integer format if needed
+    if needsDecimalConversion then
+        return value / 1000
+    end
+    return value
+end
+
 function FLIPR:GetItemSaleRate(itemID)
-    -- Convert to TSM item string format
+    -- Backward compatibility function
     local itemString = TSM_API.ToItemString("i:" .. itemID)
-    if not itemString then return 0 end
-    
-    -- Get sale rate and convert from TSM's format
-    local saleRate = TSM_API.GetCustomPriceValue("DBRegionSaleRate*1000", itemString)
-    if not saleRate then return 0 end
-    
-    saleRate = tonumber(saleRate)
-    if not saleRate then return 0 end
-    
-    return saleRate/1000
+    return self:GetTSMValue("DBRegionSaleRate*1000", itemString, true)
 end
 
 function FLIPR:GetMaxInventoryForSaleRate(itemID)
-    local saleRate = self:GetItemSaleRate(itemID)
+    local itemString = TSM_API.ToItemString("i:" .. itemID)
+    local saleRate = self:GetTSMValue("DBRegionSaleRate*1000", itemString, true)
     
     if saleRate >= self.db.highSaleRate then
         return self.db.highInventory
@@ -74,18 +77,116 @@ function FLIPR:CalculateDeposit(itemID, duration, quantity, isCommodity)
     end
 end
 
+function FLIPR:AnalyzeMarketConditions(itemID)
+    local itemString = TSM_API.ToItemString("i:" .. itemID)
+    if not itemString then return nil end
+    
+    -- Get price sources (with proper decimal handling)
+    local regionMarket = self:GetTSMValue("DBRegionMarketAvg*1000", itemString, true)
+    local localMarket = self:GetTSMValue("DBMarket*1000", itemString, true)
+    local historical = self:GetTSMValue("DBRegionHistorical*1000", itemString, true)
+    local saleRate = self:GetTSMValue("DBRegionSaleRate*1000", itemString, true)
+    local soldPerDay = self:GetTSMValue("DBRegionSoldPerDay", itemString, false)
+    
+    -- Market stability check
+    local marketStability = localMarket / regionMarket
+    local isStableMarket = (marketStability >= 0.7 and marketStability <= 1.3)
+    
+    -- Historical price comparison
+    local historicalComparison = localMarket / historical
+    local isPriceLow = (historicalComparison < 0.8)
+    
+    -- Categorize item by sale metrics
+    local saleCategory = self:GetSaleCategory(saleRate, soldPerDay)
+    
+    return {
+        isStableMarket = isStableMarket,
+        isPriceLow = isPriceLow,
+        marketStability = marketStability,
+        historicalComparison = historicalComparison,
+        saleRate = saleRate,
+        soldPerDay = soldPerDay,
+        saleCategory = saleCategory,
+        localMarket = localMarket,
+        regionMarket = regionMarket
+    }
+end
+
+function FLIPR:GetSaleCategory(saleRate, soldPerDay)
+    if saleRate >= 0.3 and soldPerDay >= 5 then
+        return "HIGH_VOLUME"    -- Fast movers
+    elseif saleRate >= 0.1 then
+        return "MEDIUM_VOLUME"  -- Regular items
+    elseif saleRate >= 0.06 then
+        return "LOW_VOLUME"     -- Slow movers
+    else
+        return "VERY_LOW_VOLUME" -- Very slow movers
+    end
+end
+
+function FLIPR:CalculateRequiredROI(marketData)
+    -- Base ROI requirements from saved variables
+    local baseROI = {
+        HIGH_VOLUME = self.db.highVolumeROI,
+        MEDIUM_VOLUME = self.db.mediumVolumeROI,
+        LOW_VOLUME = self.db.lowVolumeROI,
+        VERY_LOW_VOLUME = self.db.veryLowVolumeROI
+    }
+    
+    local requiredROI = baseROI[marketData.saleCategory]
+    
+    -- Adjust for market conditions using saved multipliers
+    if not marketData.isStableMarket then
+        requiredROI = requiredROI * self.db.unstableMarketMultiplier
+    end
+    
+    if marketData.isPriceLow then
+        requiredROI = requiredROI * self.db.historicalLowMultiplier
+    end
+    
+    -- Additional risk premium for very low sale rates
+    if marketData.saleCategory == "VERY_LOW_VOLUME" then
+        -- Extra premium based on how far below 0.06 the sale rate is
+        local rateMultiplier = math.max(1, (0.06 - marketData.saleRate) * 20)
+        requiredROI = requiredROI * rateMultiplier
+    end
+    
+    return requiredROI
+end
+
+function FLIPR:IsFlashSale(currentPrice, marketData)
+    -- More aggressive for high volume items
+    local discountThresholds = {
+        HIGH_VOLUME = 0.7,     -- 30% discount needed
+        MEDIUM_VOLUME = 0.6,   -- 40% discount needed
+        LOW_VOLUME = 0.5,      -- 50% discount needed
+        VERY_LOW_VOLUME = 0.4  -- 60% discount needed
+    }
+    
+    local threshold = discountThresholds[marketData.saleCategory]
+    local isSignificantDiscount = (currentPrice < marketData.localMarket * threshold)
+    
+    -- For very low volume items, require even steeper discounts if sale rate is extremely low
+    if marketData.saleCategory == "VERY_LOW_VOLUME" and marketData.saleRate < 0.03 then
+        return isSignificantDiscount and (currentPrice < marketData.localMarket * 0.3) -- 70% discount
+    end
+    
+    return isSignificantDiscount
+end
+
 function FLIPR:AnalyzeFlipOpportunity(results, itemID)
     -- Initial checks...
     local itemData = self.itemDB[itemID]
     if not itemData then return nil end
     
+    -- Get market conditions
+    local marketData = self:AnalyzeMarketConditions(itemID)
+    if not marketData then return nil end
+    
     -- Get inventory limits using direct TSM sale rate
     local maxInventory = self:GetMaxInventoryForSaleRate(itemID)
     local currentInventory = self:GetCurrentInventory(itemID)
     local roomForMore = maxInventory - currentInventory
-    
-    -- Get current sale rate for debug output
-    local saleRate = self:GetItemSaleRate(itemID)
     
     if roomForMore <= 0 then
         print(string.format(
@@ -93,7 +194,7 @@ function FLIPR:AnalyzeFlipOpportunity(results, itemID)
             GetItemInfo(itemID) or itemID,
             currentInventory,
             maxInventory,
-            tostring(saleRate)
+            tostring(marketData.saleRate)
         ))
         return nil
     end
@@ -118,6 +219,9 @@ function FLIPR:AnalyzeFlipOpportunity(results, itemID)
     local profitableAuctions = {}
     local ahCut = 0.05  -- 5% AH fee
     
+    -- Get required ROI for this item
+    local requiredROI = self:CalculateRequiredROI(marketData)
+    
     for i = 1, #results-1 do
         local buyPrice = results[i].minPrice
         local nextPrice = results[i+1].minPrice
@@ -128,15 +232,19 @@ function FLIPR:AnalyzeFlipOpportunity(results, itemID)
         
         -- Calculate potential profit including deposit cost
         local potentialProfit = (nextPrice * (1 - ahCut)) - (buyPrice + deposit)
+        local roi = (potentialProfit / buyPrice) * 100
         
-        if potentialProfit > 0 then
+        -- Check both ROI and minimum profit requirements
+        local minProfitInCopper = self.db.minProfit * 10000  -- Convert gold to copper (1g = 10000c)
+        if potentialProfit >= minProfitInCopper and roi >= requiredROI then
             table.insert(profitableAuctions, {
                 index = i,
                 buyPrice = buyPrice,
                 sellPrice = nextPrice,
                 quantity = quantity,
                 profit = potentialProfit,
-                deposit = deposit
+                deposit = deposit,
+                roi = roi
             })
         else
             -- Stop looking once we find unprofitable price points
@@ -159,12 +267,14 @@ function FLIPR:AnalyzeFlipOpportunity(results, itemID)
         "- Sell price: %s\n" ..
         "- Deposit cost: %s\n" ..
         "- Profit per item: %s\n" ..
+        "- ROI: %.2f%%\n" ..
         "- Can buy: %d/%d",
         GetItemInfo(itemID) or itemID,
         GetCoinTextureString(bestDeal.buyPrice),
         GetCoinTextureString(bestDeal.sellPrice),
         GetCoinTextureString(bestDeal.deposit),
         GetCoinTextureString(bestDeal.profit),
+        bestDeal.roi,
         buyQuantity,
         bestDeal.quantity
     ))
@@ -177,10 +287,10 @@ function FLIPR:AnalyzeFlipOpportunity(results, itemID)
         deposit = bestDeal.deposit,
         totalProfit = bestDeal.profit * buyQuantity,
         profitPerItem = bestDeal.profit,
-        roi = (bestDeal.profit / bestDeal.buyPrice) * 100,
+        roi = bestDeal.roi,
         currentInventory = currentInventory,
         maxInventory = maxInventory,
-        saleRate = saleRate,
+        saleRate = marketData.saleRate,
         totalAvailable = bestDeal.quantity
     }
 end 

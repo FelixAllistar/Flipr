@@ -73,7 +73,17 @@ function FLIPR:GetItemsFromGroup(groupTable, path)
 end
 
 function FLIPR:OnInitialize()
-    -- Initialize settings with defaults
+    -- Initialize groups database
+    FliprDB = FliprDB or {
+        groups = {},
+        version = 1,
+        -- UI settings
+        showConfirm = true,
+        enabledGroups = {},      
+        expandedGroups = {}      
+    }
+    
+    -- Initialize profitability settings separately
     FliprSettings = FliprSettings or {
         version = 1,
         -- Inventory control settings
@@ -82,27 +92,28 @@ function FLIPR:OnInitialize()
         highInventory = 100,     
         mediumInventory = 10,    
         lowInventory = 5,
-        -- UI settings
-        showConfirm = true,
-        enabledGroups = {},      
-        expandedGroups = {}      
-    }
-    
-    -- Initialize groups database separately
-    FliprDB = FliprDB or {
-        groups = {},
-        version = 1
+        -- Profitability settings
+        minProfit = 1000,         -- 10 silver minimum profit
+        highVolumeROI = 15,       -- 15% for fast movers
+        mediumVolumeROI = 25,     -- 25% for regular items
+        lowVolumeROI = 40,        -- 40% for slow movers
+        veryLowVolumeROI = 70,    -- 70% for very slow movers
+        unstableMarketMultiplier = 1.3,  -- 30% more profit needed in unstable markets
+        historicalLowMultiplier = 0.8,   -- 20% less ROI needed if prices are historically low
     }
     
     -- Set references
-    self.db = FliprSettings      -- For addon settings
-    self.groupDB = FliprDB       -- For groups data
-    
-    -- Create options panel
-    self:CreateOptionsPanel()
+    self.db = FliprSettings      -- For profitability settings
+    self.groupDB = FliprDB       -- For groups data and UI settings
     
     -- Initialize database
     self:InitializeDB()
+    
+    -- Initialize available groups
+    self.availableGroups = self:GetAvailableGroups()
+    
+    -- Create options panel (moved to after database initialization)
+    self:CreateOptionsPanel()
     
     -- Register slash commands
     self:RegisterChatCommand("flipr", "HandleSlashCommand")
