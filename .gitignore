@@ -1,0 +1,7 @@
+build/
+dist/
+build.py
+scraper.py
+split_data.py
+tsm_scraper_gui.py
+TSM_Scraper.exe
