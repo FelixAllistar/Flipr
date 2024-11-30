@@ -1115,7 +1115,7 @@ function FLIPR:SelectAuctionRange(dropdown, selectedIndex)
             self.selectedItem.totalQuantity = totalQuantity
             self.selectedItem.selectedAuctions = selectedAuctions
             self.selectedItem.totalCost = totalCost
-            self.selectedItem.auctions = rowData.auctions  -- Make sure auctions are passed through
+            self.selectedItem.auctions = rowData.results  -- Make sure auctions are passed through
         end
     end
     
@@ -1219,5 +1219,44 @@ function FLIPR:BuySelectedAuctions()
     self.buyConfirmFrame.totalText:SetText(string.format("Total Cost: %s", GetCoinTextureString(totalCost)))
     
     self.buyConfirmFrame:Show()
+end
+
+function FLIPR:RemoveItemRowAndUpdate(itemID)
+    -- Get the row data
+    local rowData = self.itemRows[itemID]
+    if not rowData then return end
+    
+    -- Hide and cleanup the frame
+    if rowData.frame then
+        rowData.frame:Hide()
+        rowData.frame:SetParent(nil)
+    end
+    
+    -- Clear from our tracking table
+    self.itemRows[itemID] = nil
+    
+    -- Decrease count
+    self.profitableItemCount = math.max(0, (self.profitableItemCount or 1) - 1)
+    
+    -- Clear selection if this was the selected item
+    if self.selectedItem and self.selectedItem.itemID == itemID then
+        self.selectedItem = nil
+    end
+    
+    -- Collapse any expanded dropdown
+    self:CollapseDropdown()
+    
+    -- Reindex remaining rows
+    local currentIndex = 1
+    for _, remainingRow in pairs(self.itemRows) do
+        remainingRow.rowIndex = currentIndex
+        if remainingRow.frame then
+            remainingRow.frame.rowIndex = currentIndex
+        end
+        currentIndex = currentIndex + 1
+    end
+    
+    -- Update positions of remaining rows
+    self:UpdateRowPositions()
 end
  

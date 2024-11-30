@@ -110,6 +110,7 @@ function FLIPR:CreateBuyConfirmationFrame()
                 C_AuctionHouse.ConfirmCommoditiesPurchase(itemID, totalQty)
                 self:UnregisterEvent("AUCTION_HOUSE_THROTTLED_SYSTEM_READY")
                 self:EndPurchaseThrottle()
+                self:RemoveItemRowAndUpdate(itemID)
             end)
         else
             for _, auction in pairs(self.selectedItem.selectedAuctions) do
@@ -117,6 +118,7 @@ function FLIPR:CreateBuyConfirmationFrame()
             end
             C_Timer.After(0.5, function()
                 self:EndPurchaseThrottle()
+                self:RemoveItemRowAndUpdate(itemID)
             end)
         end
         
