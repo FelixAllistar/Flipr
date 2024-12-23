@@ -16,6 +16,7 @@ FLIPR.retryState = {
     isRetrying = false
 }
 FLIPR.retryTimer = nil
+FLIPR.isThrottled = false
 
 function FLIPR:FormatGoldAndSilver(goldValue)
     local gold = math.floor(goldValue)
@@ -207,6 +208,7 @@ function FLIPR:ScanItems()
         self:RegisterEvent("COMMODITY_SEARCH_RESULTS_UPDATED", "OnCommoditySearchResults")
         self:RegisterEvent("ITEM_SEARCH_RESULTS_UPDATED", "OnItemSearchResults")
         self:RegisterEvent("AUCTION_HOUSE_THROTTLED_MESSAGE_RESPONSE_RECEIVED", "OnThrottleResponse")
+        self:RegisterEvent("AUCTION_HOUSE_THROTTLED_MESSAGE_SENT", function() self.isThrottled = true end)
         self.isEventRegistered = true
     end
 
@@ -220,13 +222,13 @@ function FLIPR:ScanItems()
 end
 
 function FLIPR:OnThrottleResponse()
-    if self.waitingForThrottle then
-        self.waitingForThrottle = false
-        -- Add a small delay after throttle response before continuing
-        C_Timer.After(0.5, function()
-            self:ScanNextItem()  -- Continue with the current item
-        end)
-    end
+    self.isThrottled = false
+    -- Add a small delay after throttle response before continuing
+    C_Timer.After(0.5, function()
+        if self.isScanning and not self.isPaused then
+            self:ScanNextItem()
+        end
+    end)
 end
 
 function FLIPR:ScanNextItem()
@@ -245,6 +247,15 @@ function FLIPR:ScanNextItem()
         return
     end
 
+    -- Check if we're throttled
+    if not C_AuctionHouse.IsThrottledMessageSystemReady() then
+        if not self.isThrottled then
+            self.isThrottled = true
+            print("|cFFFFFF00Throttled, waiting for system ready event...|r")
+        end
+        return -- Don't continue until we get the throttle response event
+    end
+
     -- Continue with normal scanning
     if self.currentScanIndex <= #self.itemIDs then
         local itemID = self.itemIDs[self.currentScanIndex]
@@ -258,27 +269,15 @@ function FLIPR:ScanNextItem()
             return
         end
         
-        -- Always print scanning message first
-        print(string.format("|cFFFFFFFFScanning item %d/%d: %s (%d)|r", 
-            self.currentScanIndex, #self.itemIDs, itemData.name, itemID))
-
-        -- Check if we're throttled from scanning (not from purchasing)
-        if not C_AuctionHouse.IsThrottledMessageSystemReady() and not self.isPurchaseThrottled then
-            local itemID = self.itemIDs[self.currentScanIndex]
-            local itemInfo = itemID and C_AuctionHouse.GetItemKeyInfo(C_AuctionHouse.MakeItemKey(itemID))
-            
-            -- Wait even longer if it's a commodity
-            local waitTime = (itemInfo and itemInfo.isCommodity) and 15 or 10
-            print(string.format("Throttled, waiting %ds...", waitTime))
-            C_Timer.After(waitTime, function() self:ScanNextItem() end)
-            return
-        end
-
         -- Update progress text
         if self.scanProgressText then
             self.scanProgressText:SetText(string.format("%d/%d items", 
                 self.currentScanIndex, #self.itemIDs))
         end
+        
+        -- Always print scanning message first
+        print(string.format("|cFFFFFFFFScanning item %d/%d: %s (%d)|r", 
+            self.currentScanIndex, #self.itemIDs, itemData.name, itemID))
 
         -- Check if item is a commodity using AH API
         local itemKey = C_AuctionHouse.MakeItemKey(itemID)
@@ -388,12 +387,17 @@ function FLIPR:OnCommoditySearchResults()
     local itemID = self.itemIDs[self.currentScanIndex]
     if not itemID then return end
     
-    -- For commodities, ALWAYS wait for full results
+    -- For commodities, request more results if needed
     if not C_AuctionHouse.HasFullCommoditySearchResults(itemID) then
-        print("Waiting for full commodity results...")
-        C_Timer.After(1, function()
-            C_AuctionHouse.RequestMoreCommoditySearchResults(itemID)
-        end)
+        if not C_AuctionHouse.IsThrottledMessageSystemReady() then
+            if not self.isThrottled then
+                self.isThrottled = true
+                print("|cFFFFFF00Throttled while requesting more results, waiting...|r")
+            end
+            return -- Wait for throttle response event
+        end
+        print("Requesting more commodity results...")
+        C_AuctionHouse.RequestMoreCommoditySearchResults(itemID)
         return
     end
     
@@ -661,6 +665,7 @@ end
 -- Add a function to cancel any pending timers
 function FLIPR:CancelPendingScans()
     self.isScanning = false
+    self.isThrottled = false
     -- Cancel retry timer if it exists
     if self.retryTimer then
         self.retryTimer:Cancel()

@@ -179,6 +179,18 @@ local function ConvertFliprToTSM(fliprData)
     return tsmData
 end
 
+local function PrintTable(tbl, indent)
+    indent = indent or ""
+    for k, v in pairs(tbl) do
+        if type(v) == "table" then
+            print(indent .. tostring(k) .. ":")
+            PrintTable(v, indent .. "  ")
+        else
+            print(indent .. tostring(k) .. " = " .. tostring(v))
+        end
+    end
+end
+
 local function TestTSMImport(importString)
     -- Try each decode method in order
     local success, data = DecodeNewImport(importString)
@@ -193,76 +205,71 @@ local function TestTSMImport(importString)
         return false, nil
     end
 
-    -- Print the decoded data structure
-    -- print("Successfully decoded TSM group import!")
-    -- print("Structure:")
+    print("\n|cFF00FF00=== TSM Import Debug Information ===|r")
     
     -- Print groups
-    -- print("\nGroups:")
+    print("\n|cFFFFFF00Groups:|r")
     if data.groups then
         for groupPath, _ in pairs(data.groups) do
-            -- print("  - " .. groupPath)
+            print("  - " .. groupPath)
         end
     else
-        -- print("  No groups found")
+        print("  No groups found")
     end
 
-    -- Print items with enhanced information
-    -- print("\nItems:")
-    if data.items then
-        local itemCount = 0
-        local processedCount = 0
-        
-        for itemString, groupPath in pairs(data.items) do
-            itemCount = itemCount + 1
-            local itemId = itemString:match("i:(%d+)")
-            
-            if itemId then
-                ProcessItemInfo(itemId, function(itemInfo)
-                    processedCount = processedCount + 1
-                    
-                    -- Format gold value
-                    local marketValue = itemInfo.marketValue
-                    local goldValue = marketValue and math.floor(marketValue / 10000) or 0
-                    local silverValue = marketValue and math.floor((marketValue % 10000) / 100) or 0
-                    local copperValue = marketValue and (marketValue % 100) or 0
-                    
-                    -- print(string.format("  - %s (%s)", itemInfo.link or itemId, groupPath))
-                    -- print(string.format("    Market Value: %dg %ds %dc", goldValue, silverValue, copperValue))
-                    -- print(string.format("    Sale Rate: %.2f%%", (itemInfo.saleRate or 0) * 100))
-                    
-                    -- If this is the last item, print summary
-                    if processedCount == itemCount then
-                        -- print(string.format("\nProcessed %d items", processedCount))
-                    end
-                end)
+    -- Print operations in detail
+    print("\n|cFFFFFF00Operations:|r")
+    if data.operations then
+        print("Global Operations:")
+        for moduleName, moduleOps in pairs(data.operations) do
+            print("  Module: " .. moduleName)
+            for opName, opSettings in pairs(moduleOps) do
+                print("    Operation: " .. opName)
+                print("    Settings:")
+                PrintTable(opSettings, "      ")
             end
         end
     else
-        -- print("  No items found")
+        print("  No global operations found")
     end
 
-    -- Print operations
-    -- print("\nOperations:")
+    -- Print group operations
+    print("\n|cFFFFFF00Group Operations:|r")
     if data.groupOperations then
         for groupPath, modules in pairs(data.groupOperations) do
-            -- print("  Group: " .. groupPath)
+            print("  Group: " .. groupPath)
             for moduleName, operations in pairs(modules) do
-                -- print("    - Module: " .. moduleName)
-                for i, op in ipairs(operations) do
-                    -- print("      Operation " .. i .. ": " .. op)
-                end
+                print("    Module: " .. moduleName)
+                print("    Operations:")
+                PrintTable(operations, "      ")
             end
         end
     else
-        -- print("  No operations found")
+        print("  No group operations found")
     end
 
-    -- Print raw data for debugging
-    -- print("\nRaw Data:")
-    for k,v in pairs(data) do
-        -- print("  " .. k .. " = " .. type(v))
+    -- Print raw operation data for analysis
+    print("\n|cFFFFFF00Raw Operation Data:|r")
+    if data.operations then
+        print("Operations Table Structure:")
+        PrintTable(data.operations, "  ")
     end
+
+    print("\n|cFFFFFF00Custom Sources:|r")
+    if data.customSources then
+        for sourceName, sourceData in pairs(data.customSources) do
+            print("  " .. sourceName .. ":")
+            if type(sourceData) == "table" then
+                PrintTable(sourceData, "    ")
+            else
+                print("    = " .. tostring(sourceData))
+            end
+        end
+    else
+        print("  No custom sources found")
+    end
+
+    print("|cFF00FF00=== End of TSM Import Debug ===|r\n")
 
     return true, data
 end
@@ -281,7 +288,9 @@ local function ConvertToFliprFormat(tsmData)
     fliprData[rootGroup] = {
         name = rootGroup,
         items = {},
-        children = {}
+        children = {},
+        operations = tsmData.operations or {},  -- Store global operations
+        groupOperations = tsmData.groupOperations or {}  -- Store group operations
     }
     
     -- Helper function to ensure group path exists
@@ -321,51 +330,6 @@ local function ConvertToFliprFormat(tsmData)
         end
     end
     
-    -- Print group structure and count items
-    local totalFliprItems = 0
-    local function printGroupStructure(group, indent)
-        indent = indent or 0
-        local prefix = string.rep("  ", indent)
-        
-        -- Count items in this group AND its children
-        local function countGroupItems(g)
-            local count = 0
-            -- Count direct items
-            for itemId, _ in pairs(g.items) do
-                count = count + 1
-                if indent == 0 then  -- Only increment total once at root level
-                    totalFliprItems = totalFliprItems + 1
-                end
-            end
-            -- Count items in children
-            for _, child in pairs(g.children) do
-                count = count + countGroupItems(child)
-            end
-            return count
-        end
-        
-        -- Get total items for this group and its children
-        local totalItems = countGroupItems(group)
-        
-        -- Always show item count for debugging purposes
-        -- print(prefix .. group.name .. " (" .. totalItems .. " items)")
-        
-        -- Print children in sorted order
-        local children = {}
-        for _, child in pairs(group.children) do
-            table.insert(children, child)
-        end
-        table.sort(children, function(a,b) return a.name < b.name end)
-        
-        for _, child in ipairs(children) do
-            printGroupStructure(child, indent + 1)
-        end
-    end
-    
-    -- print("\nConverted group structure:")
-    printGroupStructure(fliprData[rootGroup])
-    -- print("\nTotal Flipr items:", totalFliprItems)
-    
     return fliprData
 end
 
@@ -376,6 +340,10 @@ local function SaveImportedGroup(fliprData)
         return false
     end
     
+    -- Initialize operations storage if it doesn't exist
+    FLIPR.groupDB.operations = FLIPR.groupDB.operations or {}
+    FLIPR.groupDB.groupOperations = FLIPR.groupDB.groupOperations or {}
+    
     -- For each root group in the imported data
     for groupName, groupData in pairs(fliprData) do
         -- If group exists, remove it first
@@ -385,6 +353,16 @@ local function SaveImportedGroup(fliprData)
         
         -- Save new group data
         FLIPR.groupDB.groups[groupName] = groupData
+        
+        -- Save operations if they exist
+        if groupData.operations then
+            FLIPR.groupDB.operations[groupName] = groupData.operations
+        end
+        
+        -- Save group operations if they exist
+        if groupData.groupOperations then
+            FLIPR.groupDB.groupOperations[groupName] = groupData.groupOperations
+        end
         
         -- Enable the root group
         FLIPR.db.enabledGroups[groupName] = true

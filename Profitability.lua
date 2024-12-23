@@ -124,7 +124,7 @@ function FLIPR:GetSaleCategory(saleRate, soldPerDay)
     end
 end
 
-function FLIPR:CalculateRequiredROI(marketData)
+function FLIPR:CalculateRequiredROI(marketData, itemID)
     -- Base ROI requirements from saved variables
     local baseROI = {
         HIGH_VOLUME = self.db.highVolumeROI,
@@ -135,20 +135,32 @@ function FLIPR:CalculateRequiredROI(marketData)
     
     local requiredROI = baseROI[marketData.saleCategory]
     
-    -- Adjust for market conditions using saved multipliers
+    -- Market volatility adjustment
     if not marketData.isStableMarket then
-        requiredROI = requiredROI * self.db.unstableMarketMultiplier
+        local volatilityFactor = math.abs(1 - marketData.marketStability)
+        requiredROI = requiredROI * (1 + volatilityFactor)
     end
     
+    -- Historical price adjustment - REVERSED logic
     if marketData.isPriceLow then
-        requiredROI = requiredROI * self.db.historicalLowMultiplier
+        -- When prices are historically low, reduce required ROI to buy more
+        -- But only if market is stable
+        if marketData.isStableMarket then
+            requiredROI = requiredROI * 0.8  -- 20% lower requirements
+        end
     end
     
-    -- Additional risk premium for very low sale rates
-    if marketData.saleCategory == "VERY_LOW_VOLUME" then
-        -- Extra premium based on how far below 0.06 the sale rate is
-        local rateMultiplier = math.max(1, (0.06 - marketData.saleRate) * 20)
-        requiredROI = requiredROI * rateMultiplier
+    -- Add market depth considerations
+    if itemID then
+        local depthData = self:AnalyzeMarketDepth(itemID)
+        if depthData then
+            if depthData.volumeToListings < 0.1 then  -- Market is oversaturated
+                requiredROI = requiredROI * 1.5       -- Require 50% more ROI
+            end
+            if depthData.priceSpread > 0.5 then      -- Large price gaps
+                requiredROI = requiredROI * 1.3       -- Require 30% more ROI
+            end
+        end
     end
     
     return requiredROI
@@ -220,7 +232,7 @@ function FLIPR:AnalyzeFlipOpportunity(results, itemID)
     local ahCut = 0.05  -- 5% AH fee
     
     -- Get required ROI for this item
-    local requiredROI = self:CalculateRequiredROI(marketData)
+    local requiredROI = self:CalculateRequiredROI(marketData, itemID)
     
     for i = 1, #results-1 do
         local buyPrice = results[i].minPrice
@@ -292,5 +304,32 @@ function FLIPR:AnalyzeFlipOpportunity(results, itemID)
         maxInventory = maxInventory,
         saleRate = marketData.saleRate,
         totalAvailable = bestDeal.quantity
+    }
+end
+
+function FLIPR:AnalyzeMarketDepth(itemID)
+    local itemString = TSM_API.ToItemString("i:" .. itemID)
+    if not itemString then return nil end
+    
+    -- Get various price points
+    local dbMarket = self:GetTSMValue("DBMarket*1000", itemString, true)
+    local dbMinBuyout = self:GetTSMValue("DBMinBuyout*1000", itemString, true)
+    local dbHistorical = self:GetTSMValue("DBHistorical*1000", itemString, true)
+    
+    -- Get volume metrics
+    local avgDaily = self:GetTSMValue("DBRegionSoldPerDay", itemString, false)
+    local numAuctions = self:GetTSMValue("DBRegionMarketAvg", itemString, false)
+    
+    -- Calculate market depth indicators
+    local priceSpread = (dbMarket - dbMinBuyout) / dbMarket
+    local volumeToListings = avgDaily / (numAuctions or 1)
+    
+    return {
+        priceSpread = priceSpread,           -- Higher spread indicates more price volatility
+        volumeToListings = volumeToListings, -- Higher ratio means items sell through faster
+        avgDailyVolume = avgDaily,
+        currentListings = numAuctions,
+        marketPrice = dbMarket,
+        historicalPrice = dbHistorical
     }
 end 
