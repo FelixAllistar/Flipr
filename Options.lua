@@ -19,6 +19,15 @@ local defaultSettings = {
     historicalLowMultiplier = 0.8,   -- 20% less ROI needed if prices are historically low
 }
 
+-- Add this helper function at the top of the file
+local function CountTable(tbl)
+    local count = 0
+    for _ in pairs(tbl) do
+        count = count + 1
+    end
+    return count
+end
+
 local function CreateSettingRow(parent, label, yOffset, dbKey, maxValue, isProfitSetting)
     local rowContainer = CreateFrame("Frame", nil, parent)
     rowContainer:SetHeight(30)
@@ -135,7 +144,7 @@ function FLIPR:CreateOptionsPanel()
     
     -- Initialize tab system
     panel.tabs = {}
-    panel.numTabs = 2
+    panel.numTabs = 3
     
     -- Create tab buttons
     local function CreateTab(text, index)
@@ -179,6 +188,7 @@ function FLIPR:CreateOptionsPanel()
     -- Create tabs
     local generalTab = CreateTab("General", 1)
     local operationsTab = CreateTab("Operations", 2)
+    local groupsTab = CreateTab("Groups", 3)
     
     -- Initialize tab system after creating tabs
     PanelTemplates_SetNumTabs(panel, panel.numTabs)
@@ -308,6 +318,43 @@ function FLIPR:CreateOptionsPanel()
                         contentHeight = contentHeight + 15
                     end
                     
+                    -- Add groups using this operation
+                    local groupsUsingOp = {}
+                    for groupName, groupData in pairs(self.groupDB.groups) do
+                        -- Check if this group or any of its subgroups use the operation
+                        local function checkGroup(group, parentPath)
+                            local currentPath = parentPath and (parentPath .. "/" .. group.name) or group.name
+                            
+                            -- Check if this group uses the operation
+                            if group.operations and 
+                               group.operations[moduleName] and 
+                               group.operations[moduleName][opName] then
+                                table.insert(groupsUsingOp, currentPath)
+                            end
+                            
+                            -- Check subgroups
+                            if group.subgroups then
+                                for _, subgroup in pairs(group.subgroups) do
+                                    checkGroup(subgroup, currentPath)
+                                end
+                            end
+                        end
+                        
+                        -- Start checking from the root group
+                        checkGroup(groupData)
+                    end
+                    
+                    if #groupsUsingOp > 0 then
+                        offset = offset - 15  -- Extra space before groups list
+                        local groupsText = scrollChild:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+                        groupsText:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 80, offset)
+                        groupsText:SetTextColor(0.7, 0.7, 0.7)  -- Light gray color
+                        groupsText:SetText("Groups: " .. table.concat(groupsUsingOp, ", "))
+                        
+                        offset = offset - 15
+                        contentHeight = contentHeight + 30  -- Account for groups text and spacing
+                    end
+                    
                     offset = offset - 10
                     contentHeight = contentHeight + 10
                 end
@@ -350,14 +397,669 @@ function FLIPR:CreateOptionsPanel()
         return scrollFrame
     end
     
-    -- Create content for both tabs
+    -- Create the groups content
+    local function CreateGroupsContent(parent)
+        print("=== CreateGroupsContent START ===")
+        
+        -- Create container frame first
+        local container = CreateFrame("Frame", "FliprGroupsContainer", parent)
+        container:SetAllPoints()
+        container:SetFrameLevel(parent:GetFrameLevel() + 1)
+        
+        -- Initialize database tables first
+        if not FLIPR.db then FLIPR.db = {} end
+        if not FLIPR.db.expandedGroups then FLIPR.db.expandedGroups = {} end
+        if not FLIPR.db.enabledGroups then FLIPR.db.enabledGroups = {} end
+
+        -- Initialize available groups from existing data
+        if not FLIPR.availableGroups then
+            print("Getting available groups...")
+            FLIPR.availableGroups = FLIPR:GetAvailableGroups()
+            -- Debug print the groups structure
+            for groupName, groupData in pairs(FLIPR.availableGroups) do
+                print("Group:", groupName)
+                if groupData.items then
+                    print("  Items:", CountTable(groupData.items))
+                    for itemID in pairs(groupData.items) do
+                        print(string.format("  - Item %d", itemID))
+                    end
+                end
+            end
+        end
+        
+        -- Create all the UI elements
+        local treePanel = CreateFrame("Frame", "FliprTreePanel", container, BackdropTemplateMixin and "BackdropTemplate")
+        treePanel:SetPoint("TOPLEFT", container, "TOPLEFT", 16, -16)
+        treePanel:SetPoint("BOTTOMLEFT", container, "BOTTOMLEFT", 216, 16)
+        treePanel:SetWidth(200)
+        treePanel:SetHeight(400)
+        
+        -- Set up tree panel backdrop
+        treePanel:SetBackdrop({
+            bgFile = "Interface/Tooltips/UI-Tooltip-Background",
+            edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
+            tile = true, tileSize = 16, edgeSize = 16,
+            insets = { left = 4, right = 4, top = 4, bottom = 4 }
+        })
+        treePanel:SetBackdropColor(0.1, 0.1, 0.1, 0.8)
+        treePanel:SetBackdropBorderColor(0.6, 0.6, 0.6)
+        
+        -- Create scroll frame
+        local treeScroll = CreateFrame("ScrollFrame", "FliprTreeScroll", treePanel, "UIPanelScrollFrameTemplate")
+        treeScroll:SetPoint("TOPLEFT", treePanel, "TOPLEFT", 8, -30)
+        treeScroll:SetPoint("BOTTOMRIGHT", treePanel, "BOTTOMRIGHT", -28, 8)
+        
+        -- Create tree content
+        local treeContent = CreateFrame("Frame", "FliprTreeContent", treeScroll)
+        treeContent:SetWidth(treeScroll:GetWidth())
+        treeContent:SetHeight(400)
+        
+        -- Add GROUPS label
+        local groupsLabel = treePanel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        groupsLabel:SetPoint("TOP", treePanel, "TOP", 0, -8)
+        groupsLabel:SetText("GROUPS")
+        groupsLabel:SetTextColor(1, 0.82, 0, 1)
+        
+        -- Add debug background
+        local treeBg = treeContent:CreateTexture(nil, "BACKGROUND")
+        treeBg:SetAllPoints()
+        treeBg:SetColorTexture(0.2, 0, 0, 0.3)
+        
+        treeScroll:SetScrollChild(treeContent)
+        
+        -- Store these in the container for reference
+        container.treePanel = treePanel
+        container.treeScroll = treeScroll
+        container.treeContent = treeContent
+        
+        -- Define CreateGroupTreeItem function FIRST
+        local function CreateGroupTreeItem(groupData, parentPath, yOffset, level)
+            print(string.format("Creating tree item: %s (level %d, yOffset %d)", 
+                groupData and groupData.name or "nil", level, yOffset))
+            
+            if not groupData or not groupData.name then 
+                print("  Invalid group data")
+                return yOffset 
+            end
+            
+            -- Construct the full path properly
+            local currentPath = parentPath and (parentPath .. "/" .. groupData.name) or groupData.name
+            print("Constructed path:", currentPath)
+            local indent = level * 20
+            
+            -- Create container frame
+            local itemContainer = CreateFrame("Frame", nil, treeContent)
+            itemContainer:SetSize(treeContent:GetWidth() - indent, 20)
+            itemContainer:SetPoint("TOPLEFT", treeContent, "TOPLEFT", indent, yOffset)
+            
+            -- Add background frame BEHIND everything
+            local bgFrame = CreateFrame("Frame", nil, itemContainer)
+            bgFrame:SetAllPoints()
+            bgFrame:SetFrameLevel(itemContainer:GetFrameLevel())  -- Put at base level
+            
+            -- Add background texture to bgFrame
+            local containerBg = bgFrame:CreateTexture(nil, "BACKGROUND")
+            containerBg:SetAllPoints()
+            containerBg:SetColorTexture(0.1, 0.1, 0.1, 0.3)  -- Start with dark color
+            
+            -- Create expand button if needed (on top of background)
+            local expandButton
+            if groupData.children and next(groupData.children) then
+                expandButton = CreateFrame("Button", nil, itemContainer)
+                expandButton:SetFrameLevel(itemContainer:GetFrameLevel() + 1)  -- Above background
+                expandButton:SetSize(16, 16)
+                expandButton:SetPoint("LEFT", itemContainer, "LEFT", 0, 0)
+                
+                local expandTexture = expandButton:CreateTexture(nil, "ARTWORK")
+                expandTexture:SetAllPoints()
+                expandTexture:SetTexture(FLIPR.db.expandedGroups[currentPath] and 
+                    "Interface\\Buttons\\UI-MinusButton-Up" or 
+                    "Interface\\Buttons\\UI-PlusButton-Up")
+                
+                -- Store RefreshTreeView reference for the click handler
+                expandButton:SetScript("OnClick", function()
+                    print("Expand button clicked for:", currentPath)
+                    FLIPR.db.expandedGroups[currentPath] = not FLIPR.db.expandedGroups[currentPath]
+                    container.RefreshTreeView()  -- Use container reference
+                end)
+            end
+            
+            -- Create checkbox (on top of background)
+            local checkbox = CreateFrame("CheckButton", nil, itemContainer, "ChatConfigCheckButtonTemplate")
+            checkbox:SetFrameLevel(itemContainer:GetFrameLevel() + 1)  -- Above background
+            checkbox:SetPoint("LEFT", expandButton or itemContainer, "LEFT", expandButton and 20 or 0, 0)
+            checkbox:SetChecked(FLIPR.db.enabledGroups[currentPath] or false)
+            
+            checkbox.Text:SetText(groupData.name)
+            checkbox.Text:SetFontObject("GameFontNormalLarge")
+            checkbox.Text:SetTextColor(1, 1, 1)
+            
+            -- Define UpdateBackground function
+            local function UpdateBackground()
+                if checkbox:GetChecked() then
+                    containerBg:SetColorTexture(0, 1, 0, 0.3)  -- Green when checked
+                else
+                    containerBg:SetColorTexture(0.1, 0.1, 0.1, 0.3)  -- Dark when unchecked
+                end
+            end
+            
+            -- Initial background update
+            UpdateBackground()
+            
+            -- Add checkbox click handler
+            checkbox:SetScript("OnClick", function()
+                print("=== Checkbox OnClick START ===")
+                local checked = checkbox:GetChecked()
+                print("Checkbox clicked for:", currentPath, "checked:", checked)
+                
+                -- Update this group's state using the full path
+                FLIPR.db.enabledGroups[currentPath] = checked
+                UpdateBackground()
+                
+                -- If checked, update the content panel
+                if checked then
+                    print("Checkbox is checked, getting items from:", currentPath)
+                    -- Get the root group name from the path
+                    local rootGroupName = strsplit("/", currentPath)
+                    print("Root group name:", rootGroupName)
+                    -- Get the root group data
+                    local rootGroup = FliprDB.groups[rootGroupName]
+                    print("Root group data:", rootGroup)
+                    if rootGroup then
+                        print("Root group structure:")
+                        for k, v in pairs(rootGroup) do
+                            if type(v) == "table" then
+                                print("  ", k, ":", "table with", CountTable(v), "entries")
+                            else
+                                print("  ", k, ":", v)
+                            end
+                        end
+                    end
+                    
+                    if not rootGroup then
+                        print("No root group found for:", rootGroupName)
+                        return
+                    end
+                    
+                    -- Get items from the group using the path
+                    print("Getting items from group with path:", currentPath)
+                    local items = {}
+                    local currentNode = rootGroup
+                    local pathParts = {strsplit("/", currentPath)}
+                    
+                    -- Navigate to the correct node
+                    for i, part in ipairs(pathParts) do
+                        print("Looking for part:", part)
+                        if i == 1 then
+                            -- We're already at the root node
+                            if currentNode.name ~= part then
+                                print("Root group name mismatch:", currentNode.name, "vs", part)
+                                return
+                            end
+                        else
+                            -- For subgroups, look in the children table
+                            if currentNode.children and currentNode.children[part] then
+                                currentNode = currentNode.children[part]
+                                print("Found child group:", part)
+                            else
+                                print("Could not find child group:", part)
+                                return
+                            end
+                        end
+                    end
+                    
+                    -- Collect items from the current node and its children
+                    local function collectItems(node)
+                        if node.items then
+                            for itemId, itemData in pairs(node.items) do
+                                items[itemId] = itemData
+                                print("Found item:", itemId)
+                            end
+                        end
+                        
+                        if node.children then
+                            for _, childNode in pairs(node.children) do
+                                collectItems(childNode)
+                            end
+                        end
+                    end
+                    
+                    collectItems(currentNode)
+                    print("Found items table:", items)
+                    if items then
+                        print("Items table structure:")
+                        for k, v in pairs(items) do
+                            print("  ", k, ":", type(v) == "table" and "table" or v)
+                        end
+                    end
+                    
+                    if items and next(items) then
+                        print("Number of items:", CountTable(items))
+                        container.UpdateContentPanel(currentPath)
+                    else
+                        print("No items found in group")
+                        print("Debug: currentPath parts:")
+                        for part in string.gmatch(currentPath, "[^/]+") do
+                            print("  Path part:", part)
+                        end
+                    end
+                else
+                    print("Checkbox unchecked, clearing content panel")
+                    -- Clear the content panel when unchecked
+                    for _, child in pairs({container.itemContent:GetChildren()}) do
+                        child:Hide()
+                        child:SetParent(nil)
+                    end
+                end
+                print("=== Checkbox OnClick END ===")
+            end)
+            
+            -- Add click handler to the BACKGROUND frame
+            bgFrame:EnableMouse(true)
+            bgFrame:SetScript("OnMouseDown", function(self, button)
+                print("=== Background OnMouseDown START ===")
+                print("Button clicked:", button)
+                if button == "LeftButton" then
+                    -- Don't handle clicks on the checkbox or expand button
+                    local x, y = GetCursorPosition()
+                    local scale = self:GetEffectiveScale()
+                    local left = self:GetLeft() * scale
+                    local checkboxRight = (checkbox:GetRight() or 0) * scale
+                    
+                    print("Cursor position:", x, y)
+                    print("Scale:", scale)
+                    print("Left:", left)
+                    print("Checkbox right:", checkboxRight)
+                    
+                    -- Only process click if it's to the right of the checkbox
+                    if x > checkboxRight then
+                        print("=== Click is to the right of checkbox ===")
+                        print("Looking up group:", currentPath)
+                        
+                        -- Get the root group name from the path
+                        local rootGroupName = strsplit("/", currentPath)
+                        print("Root group name:", rootGroupName)
+                        -- Get the root group data
+                        local rootGroup = FliprDB.groups[rootGroupName]
+                        print("Root group data:", rootGroup)
+                        if rootGroup then
+                            print("Root group structure:")
+                            for k, v in pairs(rootGroup) do
+                                if type(v) == "table" then
+                                    print("  ", k, ":", "table with", CountTable(v), "entries")
+                                else
+                                    print("  ", k, ":", v)
+                                end
+                            end
+                        end
+                        
+                        if not rootGroup then
+                            print("No root group found for:", rootGroupName)
+                            return
+                        end
+                        
+                        -- Get items from the group using the path
+                        print("Getting items from group with path:", currentPath)
+                        local items = {}
+                        local currentNode = rootGroup
+                        local pathParts = {strsplit("/", currentPath)}
+                        
+                        -- Navigate to the correct node
+                        for i, part in ipairs(pathParts) do
+                            print("Looking for part:", part)
+                            if i == 1 then
+                                -- We're already at the root node
+                                if currentNode.name ~= part then
+                                    print("Root group name mismatch:", currentNode.name, "vs", part)
+                                    return
+                                end
+                            else
+                                -- For subgroups, look in the children table
+                                if currentNode.children and currentNode.children[part] then
+                                    currentNode = currentNode.children[part]
+                                    print("Found child group:", part)
+                                else
+                                    print("Could not find child group:", part)
+                                    return
+                                end
+                            end
+                        end
+                        
+                        -- Collect items from the current node and its children
+                        local function collectItems(node)
+                            if node.items then
+                                for itemId, itemData in pairs(node.items) do
+                                    items[itemId] = itemData
+                                    print("Found item:", itemId)
+                                end
+                            end
+                            
+                            if node.children then
+                                for _, childNode in pairs(node.children) do
+                                    collectItems(childNode)
+                                end
+                            end
+                        end
+                        
+                        collectItems(currentNode)
+                        print("Found items table:", items)
+                        if items then
+                            print("Items table structure:")
+                            for k, v in pairs(items) do
+                                print("  ", k, ":", type(v) == "table" and "table" or v)
+                            end
+                        end
+                        
+                        if items and next(items) then
+                            print("Number of items:", CountTable(items))
+                            for itemID, itemData in pairs(items) do
+                                -- Make sure itemID is a number
+                                itemID = tonumber(itemID)
+                                if itemID then
+                                    print(string.format("Processing item: %d", itemID))
+                                    local name = GetItemInfo(itemID)
+                                    print(string.format("Item %d: %s", itemID, name or "loading..."))
+                                    
+                                    -- Also check itemDB
+                                    if FLIPR.itemDB and FLIPR.itemDB[itemID] then
+                                        print(string.format("  Found in itemDB: %s", FLIPR.itemDB[itemID].name))
+                                    else
+                                        print("  Not found in itemDB")
+                                    end
+                                else
+                                    print("Invalid itemID:", itemID)
+                                end
+                            end
+                            -- Pass the group path to UpdateContentPanel
+                            print("Updating content panel with group:", currentPath)
+                            container.UpdateContentPanel(currentPath)
+                        else
+                            print("No items found in group:", currentPath)
+                            print("Debug: currentPath parts:")
+                            for part in string.gmatch(currentPath, "[^/]+") do
+                                print("  Path part:", part)
+                            end
+                        end
+                    else
+                        print("Click was on or to the left of checkbox")
+                    end
+                end
+                print("=== Background OnMouseDown END ===")
+            end)
+            
+            -- Add hover effect to background
+            bgFrame:SetScript("OnEnter", function()
+                if not checkbox:GetChecked() then
+                    containerBg:SetColorTexture(0.3, 0.3, 0.3, 0.3)  -- Hover color
+                end
+            end)
+            
+            bgFrame:SetScript("OnLeave", function()
+                UpdateBackground()
+            end)
+            
+            print(string.format("Created item: %s at yOffset: %d", groupData.name, yOffset))
+            
+            yOffset = yOffset - 20
+            
+            -- Show children if expanded
+            if FLIPR.db.expandedGroups[currentPath] and groupData.children then
+                for childName, childData in pairs(groupData.children) do
+                    yOffset = CreateGroupTreeItem(childData, currentPath, yOffset, level + 1)
+                end
+            end
+            
+            return yOffset
+        end
+        
+        -- THEN define RefreshTreeView function that uses CreateGroupTreeItem
+        local function RefreshTreeView()
+            print("=== RefreshTreeView START ===")
+            if not treeContent then
+                print("ERROR: treeContent is nil in RefreshTreeView!")
+                return
+            end
+            
+            -- Clear existing content
+            for _, child in pairs({treeContent:GetChildren()}) do
+                child:Hide()
+                child:SetParent(nil)
+            end
+            
+            if not FLIPR.availableGroups then
+                print("ERROR: No available groups!")
+                return
+            end
+            
+            local yOffset = -10
+            for groupName, groupData in pairs(FLIPR.availableGroups) do
+                print(string.format("Processing root group: %s", groupName))
+                yOffset = CreateGroupTreeItem(groupData, nil, yOffset, 0)
+            end
+            
+            local finalHeight = math.abs(yOffset) + 20
+            print(string.format("Setting tree content height to: %d", finalHeight))
+            treeContent:SetHeight(math.max(finalHeight, 400))
+        end
+        
+        -- Store functions directly on the container
+        container.CreateGroupTreeItem = CreateGroupTreeItem
+        container.RefreshTreeView = RefreshTreeView
+        
+        -- Print debug info before refresh
+        print("Available groups before refresh:")
+        if FLIPR.availableGroups then
+            for groupName, _ in pairs(FLIPR.availableGroups) do
+                print("  -", groupName)
+            end
+        else
+            print("No available groups!")
+        end
+        
+        -- Call initial refresh
+        RefreshTreeView()
+        
+        -- Add right panel content display
+        local contentPanel = CreateFrame("Frame", "FliprContentPanel", container, BackdropTemplateMixin and "BackdropTemplate")
+        contentPanel:SetPoint("TOPLEFT", treePanel, "TOPRIGHT", 16, 0)
+        contentPanel:SetPoint("BOTTOMRIGHT", container, "BOTTOMRIGHT", -16, 16)
+        
+        -- Set up content panel backdrop (same style as tree panel)
+        contentPanel:SetBackdrop({
+            bgFile = "Interface/Tooltips/UI-Tooltip-Background",
+            edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
+            tile = true, tileSize = 16, edgeSize = 16,
+            insets = { left = 4, right = 4, top = 4, bottom = 4 }
+        })
+        contentPanel:SetBackdropColor(0.1, 0.1, 0.1, 0.8)
+        contentPanel:SetBackdropBorderColor(0.6, 0.6, 0.6)
+        
+        -- Add ITEMS label (same style as GROUPS)
+        local itemsLabel = contentPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        itemsLabel:SetPoint("TOP", contentPanel, "TOP", 0, -8)
+        itemsLabel:SetText("ITEMS")
+        itemsLabel:SetTextColor(1, 0.82, 0, 1)  -- Gold color
+        
+        -- Create scroll frame for items
+        local itemScroll = CreateFrame("ScrollFrame", nil, contentPanel, "UIPanelScrollFrameTemplate")
+        itemScroll:SetPoint("TOPLEFT", contentPanel, "TOPLEFT", 8, -30)  -- Same offset as tree panel
+        itemScroll:SetPoint("BOTTOMRIGHT", contentPanel, "BOTTOMRIGHT", -28, 8)
+        
+        local itemContent = CreateFrame("Frame", nil, itemScroll)
+        itemContent:SetWidth(itemScroll:GetWidth())
+        itemContent:SetHeight(400)  -- Initial height
+        
+        -- Add debug background to item content
+        local itemBg = itemContent:CreateTexture(nil, "BACKGROUND")
+        itemBg:SetAllPoints()
+        itemBg:SetColorTexture(0, 0.2, 0, 0.3)  -- Slight green tint
+        
+        itemScroll:SetScrollChild(itemContent)
+        
+        -- Store references
+        container.contentPanel = contentPanel
+        container.itemContent = itemContent
+        
+        -- Function to update content panel with selected group's items
+        local function UpdateContentPanel(groupPath)
+            print("=== UpdateContentPanel START ===")
+            print("Updating content panel for group:", groupPath)
+            
+            -- Clear existing content
+            for _, child in pairs({itemContent:GetChildren()}) do
+                child:Hide()
+                child:SetParent(nil)
+            end
+            
+            -- Get the root group name from the path
+            local rootGroupName = strsplit("/", groupPath)
+            print("Root group name:", rootGroupName)
+            -- Get the root group data
+            local rootGroup = FliprDB.groups[rootGroupName]
+            if not rootGroup then
+                print("No root group found for:", rootGroupName)
+                return
+            end
+            
+            -- Get items from the group using the path
+            print("Getting items from group with path:", groupPath)
+            local items = {}
+            local currentNode = rootGroup
+            local pathParts = {strsplit("/", groupPath)}
+            
+            -- Navigate to the correct node
+            for i, part in ipairs(pathParts) do
+                print("Looking for part:", part)
+                if i == 1 then
+                    -- We're already at the root node
+                    if currentNode.name ~= part then
+                        print("Root group name mismatch:", currentNode.name, "vs", part)
+                        return
+                    end
+                else
+                    -- For subgroups, look in the children table
+                    if currentNode.children and currentNode.children[part] then
+                        currentNode = currentNode.children[part]
+                        print("Found child group:", part)
+                    else
+                        print("Could not find child group:", part)
+                        return
+                    end
+                end
+            end
+            
+            -- Collect items from the current node and its children
+            local function collectItems(node)
+                if node.items then
+                    for itemId, itemData in pairs(node.items) do
+                        items[itemId] = itemData
+                        print("Found item:", itemId)
+                    end
+                end
+                
+                if node.children then
+                    for _, childNode in pairs(node.children) do
+                        collectItems(childNode)
+                    end
+                end
+            end
+            
+            collectItems(currentNode)
+            print("Found items table:", items)
+            if items then
+                print("Items table structure:")
+                for k, v in pairs(items) do
+                    print("  ", k, ":", type(v) == "table" and "table" or v)
+                end
+            end
+            
+            if not items or not next(items) then 
+                print("No items found in group:", groupPath)
+                return 
+            end
+            
+            print("Found items in group:", groupPath)
+            print("Number of items:", CountTable(items))
+            
+            -- Display items
+            local yOffset = -10
+            for itemID, itemData in pairs(items) do
+                itemID = tonumber(itemID)
+                if itemID then
+                    print("Creating row for item:", itemID)
+                    
+                    -- Create item row
+                    local itemRow = CreateFrame("Frame", nil, itemContent)
+                    itemRow:SetHeight(24)
+                    itemRow:SetPoint("TOPLEFT", itemContent, "TOPLEFT", 0, yOffset)
+                    itemRow:SetPoint("RIGHT", itemContent, "RIGHT")
+                    
+                    -- Add row background
+                    local rowBg = itemRow:CreateTexture(nil, "BACKGROUND")
+                    rowBg:SetAllPoints()
+                    rowBg:SetColorTexture(0.1, 0.1, 0.1, 0.3)
+                    
+                    -- Add item icon and text
+                    local itemIcon = itemRow:CreateTexture(nil, "ARTWORK")
+                    itemIcon:SetSize(20, 20)
+                    itemIcon:SetPoint("LEFT", itemRow, "LEFT", 8, 0)
+                    
+                    -- Make row interactive
+                    itemRow:EnableMouse(true)
+                    itemRow:SetScript("OnEnter", function()
+                        rowBg:SetColorTexture(0.2, 0.2, 0.2, 0.8)
+                    end)
+                    itemRow:SetScript("OnLeave", function()
+                        rowBg:SetColorTexture(0.1, 0.1, 0.1, 0.3)
+                    end)
+                    
+                    print("Loading item data for:", itemID)
+                    -- Load item data asynchronously
+                    local item = Item:CreateFromItemID(itemID)
+                    item:ContinueOnItemLoad(function()
+                        local itemLink = item:GetItemLink()
+                        local _, _, _, _, icon = GetItemInfoInstant(itemID)
+                        print("Item loaded:", itemID, itemLink)
+                        
+                        itemIcon:SetTexture(icon)
+                        
+                        local itemName = itemRow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+                        itemName:SetPoint("LEFT", itemIcon, "RIGHT", 8, 0)
+                        itemName:SetText(itemLink)
+                        
+                        local itemIDText = itemRow:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                        itemIDText:SetPoint("LEFT", itemName, "RIGHT", 8, 0)
+                        itemIDText:SetText(string.format("(ID: %d)", itemID))
+                        itemIDText:SetTextColor(0.7, 0.7, 0.7)
+                    end)
+                    
+                    yOffset = yOffset - 24
+                end
+            end
+            
+            -- Update content height
+            local finalHeight = math.abs(yOffset) + 20
+            print("Setting content height to:", finalHeight)
+            itemContent:SetHeight(math.max(finalHeight, 400))
+            print("=== UpdateContentPanel END ===")
+        end
+        
+        -- Store the update function
+        container.UpdateContentPanel = UpdateContentPanel
+        
+        return container
+    end
+    
+    -- Create content for all tabs
     CreateGeneralSettings(generalTab.content)
     CreateOperationsContent(operationsTab.content)
+    groupsTab.content.CreateGroupsContent = CreateGroupsContent
     
     -- Set up initial tab state
     PanelTemplates_SetTab(panel, 1)
     generalTab.content:Show()
     operationsTab.content:Hide()
+    groupsTab.content:Hide()
     
     -- Store reference and register with Settings API
     FLIPR.optionsPanel = panel
@@ -365,24 +1067,108 @@ function FLIPR:CreateOptionsPanel()
     category.ID = "FLIPR"
     Settings.RegisterAddOnCategory(category)
     
+    -- Set up tab switching
+    panel.OnTabClick = function(tab)
+        print(string.format("=== Tab clicked: %d ===", tab:GetID()))
+        PanelTemplates_SetTab(panel, tab:GetID())
+        
+        -- Hide all tab contents
+        for _, t in ipairs(panel.tabs) do
+            if t.content then
+                print(string.format("Hiding content for tab: %d", t:GetID()))
+                t.content:Hide()
+            end
+        end
+        
+        -- Show selected tab content
+        if tab.content then
+            print(string.format("Showing content for tab: %d", tab:GetID()))
+            tab.content:Show()
+            
+            -- If this is the Groups tab, refresh the view
+            if tab:GetID() == 3 then
+                print("Groups tab selected, refreshing view...")
+                -- Force a refresh of the groups content
+                if not FLIPR.availableGroups then
+                    print("Initializing available groups...")
+                    FLIPR.availableGroups = FLIPR:GetAvailableGroups()
+                end
+                
+                -- Create the groups container if it doesn't exist
+                if not tab.content.groupsContainer then
+                    print("Creating groups container...")
+                    tab.content.groupsContainer = CreateGroupsContent(tab.content)
+                end
+                
+                -- Refresh the tree view if it exists
+                if tab.content.groupsContainer and tab.content.groupsContainer.RefreshTreeView then
+                    print("Refreshing tree view...")
+                    tab.content.groupsContainer.RefreshTreeView()
+                else
+                    print("ERROR: Groups container or RefreshTreeView not found!")
+                    print("groupsContainer:", tab.content.groupsContainer)
+                    if tab.content.groupsContainer then
+                        print("RefreshTreeView:", tab.content.groupsContainer.RefreshTreeView)
+                    end
+                end
+            end
+        end
+    end
+    
     -- Set up panel refresh
     panel.OnShow = function()
+        print("=== Panel OnShow START ===")
         PanelTemplates_SetTab(panel, panel.selectedTab or 1)
         for _, tab in ipairs(panel.tabs) do
-            tab.content:Hide()
-        end
-        local selectedTab = panel.tabs[panel.selectedTab or 1]
-        selectedTab.content:Show()
-        
-        -- Force update all edit boxes
-        C_Timer.After(0.1, function()
-            for dbKey, value in pairs(FLIPR.db) do
-                -- Find and update edit boxes
-                -- You might need to store references to edit boxes when creating them
-                -- Or traverse the UI hierarchy to find them
+            if tab.content then
+                print(string.format("Hiding content for tab: %d", tab:GetID()))
+                tab.content:Hide()
             end
+        end
+        
+        local selectedTab = panel.tabs[panel.selectedTab or 1]
+        if selectedTab and selectedTab.content then
+            print(string.format("Showing content for selected tab: %d", selectedTab:GetID()))
+            selectedTab.content:Show()
+            
+            -- If Groups tab is selected, ensure it's properly initialized
+            if selectedTab:GetID() == 3 then
+                print("Groups tab is selected, ensuring initialization...")
+                if not FLIPR.availableGroups then
+                    print("Initializing available groups...")
+                    FLIPR.availableGroups = FLIPR:GetAvailableGroups()
+                end
+                
+                -- Create the groups container if it doesn't exist
+                if not selectedTab.content.groupsContainer then
+                    print("Creating groups container...")
+                    selectedTab.content.groupsContainer = CreateGroupsContent(selectedTab.content)
+                end
+                
+                -- Refresh the tree view if it exists
+                if selectedTab.content.groupsContainer and selectedTab.content.groupsContainer.RefreshTreeView then
+                    print("Refreshing tree view...")
+                    selectedTab.content.groupsContainer.RefreshTreeView()
+                else
+                    print("ERROR: Groups container or RefreshTreeView not found!")
+                    print("groupsContainer:", selectedTab.content.groupsContainer)
+                    if selectedTab.content.groupsContainer then
+                        print("RefreshTreeView:", selectedTab.content.groupsContainer.RefreshTreeView)
+                    end
+                end
+            end
+        end
+        
+        print("=== Panel OnShow END ===")
+    end
+    
+    -- Set up tab click handlers
+    for _, tab in ipairs(panel.tabs) do
+        tab:SetScript("OnClick", function(self)
+            panel.OnTabClick(self)
         end)
     end
+    
     panel:SetScript("OnShow", panel.OnShow)
     
     return panel

@@ -226,7 +226,7 @@ function FLIPR:CreateGroupButtons(parent)
 end
 
 function FLIPR:GetAvailableGroups()
-    -- print("=== GetAvailableGroups START ===")
+    print("=== GetAvailableGroups START ===")
     local groups = {}
     
     -- Check if FliprDB exists
@@ -240,17 +240,17 @@ function FLIPR:GetAvailableGroups()
         return groups
     end
     
-    -- print("Found groups in FliprDB:")
+    print("Found groups in FliprDB:")
     for groupName, groupData in pairs(FliprDB.groups) do
-        -- print(string.format("  Group: %s", groupName))
+        print(string.format("  Group: %s", groupName))
         if groupData.children then
             for childName, _ in pairs(groupData.children) do
-                -- print(string.format("    - Child: %s", childName))
+                print(string.format("    - Child: %s", childName))
             end
         end
     end
     
-    -- print("=== GetAvailableGroups END ===")
+    print("=== GetAvailableGroups END ===")
     return FliprDB.groups
 end
 
