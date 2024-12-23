@@ -1,0 +1,42 @@
+Logic Functions
+Many users have become somewhat aware of the check() function in TSM3 thanks to the popularity of BilisOnyxia’s sniper string. In my own personal experience, check() is definitely something that at times can be hard to wrap your brain around. I’m pretty sure I used TSM for over a year before I fully understood it!
+
+To quickly explain check(), you can feed it 2 to 3 values in the format of check(a, b, c) where “c” can be optional. These 3 values can be any value TSM recognizes, from custom prices to flat gold values, to simple price source references like DBMarket. The check() function then takes a look at “a”, and looks to see if it is valid and greater than 0. If “a” is not valid, the custom price returns invalid. If “a” is greater than 0, the custom price will give you the value of “b” back, otherwise it gives the value for “c”. If you did not supply a value for “c” and “a” is not is not greater than 0, then the whole thing is treated as invalid.
+
+In TSM4, one of our main goals was to expand on the logic-based functionality of the check() function and make it easier and more intuitive for our users to incorporate logic in their custom prices. With that in mind, TSM4 adds the following new functions:
+
+ifgt() – “If Greater Than”
+ifgte() – “If Greater Than or Equal To”
+iflt() – “If Less Than”
+iflte() – “If Less Than or Equal To”
+ifeq()- “If Equal”
+round() – “Standard Rounding”
+roundup() – “Always Round Up – aka Ceiling”
+rounddown() – “Always Round Down – aka Floor”
+
+The “IF” functions are all used in the same way. You can send in 3 to 4 values in the format of ifgt(a, b, c, d) where d can be optional. TSM4 checks if “a” and “b” are valid in the same method used for check() above. TSM4 then looks at which “IF” function you are using, in our example I am using “if greater than”, so it checks if “a is greater than b”. If it is, the value of “c” is given back to us. If it is not, the value of “d” is given back if one was supplied, otherwise the whole thing is treated as invalid.
+
+The “Round” functions also follow a similar usage to each other. You can send in 1 to 2 values in the format round(a, b). The first value “a” is the number you want to round and the second value “b” is the factor you would like to round to.  For example, “round(crafting, 10s)” would return the crafting cost rounded to the nearest 10 silver. If no value of “b” is sent in, then the functions round to the nearest copper, as appropriate.
+
+Value Sources
+We currently offer many different prices from various sources including AuctionDB, Accounting, and more, but we recognize that these are not the only values that are important to TSM users when configuring their operations. We currently provide other pieces of data such as sale rate and number of expires in item tooltips, but there is currently no way to use this data in custom prices directly.
+
+In TSM4, our goal is to expose as many values as possible for use directly in custom prices. Not all of these values are prices, hence the new name of “value sources.” These are the value sources that will be available with the launch of TSM4 for use in custom prices:
+
+DBRegionSaleRate
+DBRegionSoldPerDay
+NumExpires
+ItemQuality
+ItemLevel
+RequiredLevel
+
+Examples
+Below are a few examples which demonstrate the power of the new custom prices changes coming with TSM4.
+
+iflt(DBRegionSoldPerDay, 100, DBMarket, DBRegionMarketAvg)
+
+The above function will return the DBMarket if DBRegionSoldPerDay is less than 100, otherwise it’ll return DBRegionMarketAvg.
+
+round(DBRegionMarketAvg, ifeq(ItemQuality, 4, 1000g, 1g))
+
+This second example will round DBRegionMarketAvg to the nearest 1000g for epic quality items (ItemQuality 4) or to the nearest 1g otherwise.

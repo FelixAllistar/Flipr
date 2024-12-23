@@ -489,8 +489,8 @@ function FLIPR:CreateOptionsPanel()
             
             -- Create container frame
             local itemContainer = CreateFrame("Frame", nil, treeContent)
-            itemContainer:SetSize(treeContent:GetWidth() - indent, 20)
-            itemContainer:SetPoint("TOPLEFT", treeContent, "TOPLEFT", indent, yOffset)
+            itemContainer:SetSize(treeContent:GetWidth() - indent, level == 0 and 22 or 18)  -- Slightly smaller for both
+            itemContainer:SetPoint("TOPLEFT", treeContent, "TOPLEFT", level == 0 and 0 or indent + 15, yOffset)  -- More indent for children
             
             -- Add background frame BEHIND everything
             local bgFrame = CreateFrame("Frame", nil, itemContainer)
@@ -507,7 +507,7 @@ function FLIPR:CreateOptionsPanel()
             if groupData.children and next(groupData.children) then
                 expandButton = CreateFrame("Button", nil, itemContainer)
                 expandButton:SetFrameLevel(itemContainer:GetFrameLevel() + 1)  -- Above background
-                expandButton:SetSize(16, 16)
+                expandButton:SetSize(14, 14)  -- Slightly smaller buttons
                 expandButton:SetPoint("LEFT", itemContainer, "LEFT", 0, 0)
                 
                 local expandTexture = expandButton:CreateTexture(nil, "ARTWORK")
@@ -527,12 +527,46 @@ function FLIPR:CreateOptionsPanel()
             -- Create checkbox (on top of background)
             local checkbox = CreateFrame("CheckButton", nil, itemContainer, "ChatConfigCheckButtonTemplate")
             checkbox:SetFrameLevel(itemContainer:GetFrameLevel() + 1)  -- Above background
-            checkbox:SetPoint("LEFT", expandButton or itemContainer, "LEFT", expandButton and 20 or 0, 0)
+            checkbox:SetPoint("LEFT", expandButton or itemContainer, "LEFT", expandButton and 16 or 0, 0)  -- Adjusted spacing
             checkbox:SetChecked(FLIPR.db.enabledGroups[currentPath] or false)
             
             checkbox.Text:SetText(groupData.name)
-            checkbox.Text:SetFontObject("GameFontNormalLarge")
+            checkbox.Text:SetFontObject(level == 0 and "GameFontNormal" or "GameFontNormalSmall")  -- Smaller text for both
             checkbox.Text:SetTextColor(1, 1, 1)
+            
+            -- Function to recursively update child checkboxes
+            local function UpdateChildStates(path, state)
+                -- Update current group
+                FLIPR.db.enabledGroups[path] = state
+                
+                -- Get the root group and navigate to current node
+                local rootGroupName = strsplit("/", path)
+                local rootGroup = FliprDB.groups[rootGroupName]
+                if not rootGroup then return end
+                
+                local currentNode = rootGroup
+                local pathParts = {strsplit("/", path)}
+                
+                for i, part in ipairs(pathParts) do
+                    if i == 1 then
+                        if currentNode.name ~= part then return end
+                    else
+                        if currentNode.children and currentNode.children[part] then
+                            currentNode = currentNode.children[part]
+                        else
+                            return
+                        end
+                    end
+                end
+                
+                -- Update all children recursively
+                if currentNode.children then
+                    for childName, _ in pairs(currentNode.children) do
+                        local childPath = path .. "/" .. childName
+                        UpdateChildStates(childPath, state)
+                    end
+                end
+            end
             
             -- Define UpdateBackground function
             local function UpdateBackground()
@@ -552,9 +586,12 @@ function FLIPR:CreateOptionsPanel()
                 local checked = checkbox:GetChecked()
                 print("Checkbox clicked for:", currentPath, "checked:", checked)
                 
-                -- Update this group's state using the full path
-                FLIPR.db.enabledGroups[currentPath] = checked
+                -- Update this group's state and all its children
+                UpdateChildStates(currentPath, checked)
                 UpdateBackground()
+                
+                -- Refresh the tree view to update child checkboxes
+                container.RefreshTreeView()
                 
                 -- If checked, update the content panel
                 if checked then
