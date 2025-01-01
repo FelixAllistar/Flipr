@@ -72,6 +72,181 @@ function FLIPR:GetItemsFromGroup(groupTable, path)
     return self:GetItemsFromGroup(currentTable)
 end
 
+function FLIPR:GetTSMGroups()
+    print("=== GetAvailableGroups START ===")
+    -- Check for TSM's database
+    if not TradeSkillMasterDB then
+        print("TSM database not found")
+        return
+    end
+
+    -- Get the items, operations tables, and operations data
+    local itemsTable = TradeSkillMasterDB["p@Default@userData@items"]
+    local operationsTable = TradeSkillMasterDB["p@Default@userData@groups"]
+    local operationsData = TradeSkillMasterDB["p@Default@userData@operations"]
+    if not itemsTable then
+        print("No TSM items/groups found")
+        return
+    end
+
+    -- Build a table of unique groups
+    local groups = {}
+    for _, groupPath in pairs(itemsTable) do
+        -- Split the path into parts
+        local parts = {strsplit("`", groupPath)}
+        local currentPath = ""
+        
+        -- Add each level of the group hierarchy
+        for i, part in ipairs(parts) do
+            if i == 1 then
+                currentPath = part
+            else
+                currentPath = currentPath .. "`" .. part
+            end
+            groups[currentPath] = true
+        end
+    end
+
+    -- Function to get operation details
+    local function getOperationDetails(moduleName, operationName)
+        if not operationsData or not operationsData[moduleName] or not operationsData[moduleName][operationName] then
+            return nil
+        end
+        return operationsData[moduleName][operationName]
+    end
+
+    -- Function to get operations for a group
+    local function getGroupOperations(groupPath)
+        if not operationsTable or not operationsTable[groupPath] then
+            return {}
+        end
+        
+        local ops = {}
+        for moduleName, moduleData in pairs(operationsTable[groupPath]) do
+            if type(moduleData) == "table" then
+                ops[moduleName] = {
+                    override = moduleData.override,
+                    operations = {}
+                }
+                -- Add each operation with its details
+                for i, opName in ipairs(moduleData) do
+                    local details = getOperationDetails(moduleName, opName)
+                    ops[moduleName].operations[opName] = details
+                end
+            end
+        end
+        return ops
+    end
+
+    -- Function to print group hierarchy
+    local function printGroupHierarchy(basePath, level)
+        level = level or 0
+        local indent = string.rep("  ", level)
+        
+        if level == 0 then
+            print("Group:", basePath)
+            -- Print operations for root group
+            local ops = getGroupOperations(basePath)
+            for module, moduleData in pairs(ops) do
+                if moduleData.override then
+                    print(indent .. "  " .. module .. " Operations (Override):")
+                else
+                    print(indent .. "  " .. module .. " Operations:")
+                end
+                for opName, opDetails in pairs(moduleData.operations) do
+                    print(indent .. "    - " .. opName)
+                    if opDetails then
+                        -- Print key operation settings
+                        if opDetails.maxPrice then
+                            print(indent .. "      maxPrice: " .. opDetails.maxPrice)
+                        end
+                        if opDetails.minPrice then
+                            print(indent .. "      minPrice: " .. opDetails.minPrice)
+                        end
+                        if opDetails.restockQuantity then
+                            print(indent .. "      restockQuantity: " .. opDetails.restockQuantity)
+                        end
+                    end
+                end
+            end
+        end
+        
+        -- Find all direct children of this path
+        local children = {}
+        for path in pairs(groups) do
+            -- Check if this is a direct child (one level deeper)
+            local parent = basePath == "" and "^[^`]+" or "^" .. basePath .. "`[^`]+"
+            if path:match(parent) then
+                local childName = path:match(basePath == "" and "^([^`]+)" or basePath .. "`([^`]+)")
+                if childName then
+                    children[childName] = path
+                end
+            end
+        end
+        
+        -- Sort and print children
+        local sortedChildren = {}
+        for childName in pairs(children) do
+            table.insert(sortedChildren, childName)
+        end
+        table.sort(sortedChildren)
+        
+        for _, childName in ipairs(sortedChildren) do
+            local fullPath = children[childName]
+            print(indent .. "- Child:", childName)
+            -- Print operations for this child
+            local ops = getGroupOperations(fullPath)
+            for module, moduleData in pairs(ops) do
+                if moduleData.override then
+                    print(indent .. "    " .. module .. " Operations (Override):")
+                else
+                    print(indent .. "    " .. module .. " Operations:")
+                end
+                for opName, opDetails in pairs(moduleData.operations) do
+                    print(indent .. "      - " .. opName)
+                    if opDetails then
+                        -- Print key operation settings
+                        if opDetails.maxPrice then
+                            print(indent .. "        maxPrice: " .. opDetails.maxPrice)
+                        end
+                        if opDetails.minPrice then
+                            print(indent .. "        minPrice: " .. opDetails.minPrice)
+                        end
+                        if opDetails.restockQuantity then
+                            print(indent .. "        restockQuantity: " .. opDetails.restockQuantity)
+                        end
+                    end
+                end
+            end
+            -- Recursively print this child's children
+            printGroupHierarchy(fullPath, level + 1)
+        end
+    end
+
+    -- Print the groups in a tree structure
+    print("Found groups in TSM:")
+    -- First find all root groups
+    local rootGroups = {}
+    for path in pairs(groups) do
+        if not string.find(path, "`") then
+            table.insert(rootGroups, path)
+        end
+    end
+    
+    -- Sort and print root groups
+    table.sort(rootGroups)
+    for _, rootGroup in ipairs(rootGroups) do
+        printGroupHierarchy(rootGroup)
+    end
+
+    print("=== GetAvailableGroups END ===")
+end
+
+-- Register our event handler
+FLIPR:RegisterEvent("PLAYER_LOGIN", function()
+    FLIPR:GetTSMGroups()
+end)
+
 function FLIPR:OnInitialize()
     -- Initialize groups database
     FliprDB = FliprDB or {
@@ -111,6 +286,9 @@ function FLIPR:OnInitialize()
     
     -- Initialize available groups
     self.availableGroups = self:GetAvailableGroups()
+    
+    -- Check TSM groups
+    self:GetTSMGroups()
     
     -- Create options panel (moved to after database initialization)
     self:CreateOptionsPanel()
