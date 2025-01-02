@@ -242,9 +242,194 @@ function FLIPR:GetTSMGroups()
     print("=== GetAvailableGroups END ===")
 end
 
+function FLIPR:GetTSMShoppingOperations(itemID)
+    -- Get the item's group path from TSM
+    local itemsTable = TradeSkillMasterDB["p@Default@userData@items"]
+    if not itemsTable then 
+        print("No TSM items table found")
+        return 
+    end
+    
+    local groupPath = itemsTable["i:" .. itemID]
+    if not groupPath then 
+        print("Item " .. itemID .. " not found in any TSM group")
+        return 
+    end
+    
+    -- Get the operations for this group
+    local groupOps = TradeSkillMasterDB["p@Default@userData@groups"][groupPath]
+    if not groupOps or not groupOps.Shopping then
+        print("No shopping operations found for group: " .. groupPath)
+        return
+    end
+    
+    -- Get operation details
+    local operations = {}
+    for _, opName in ipairs(groupOps.Shopping) do
+        local opDetails = TradeSkillMasterDB["p@Default@userData@operations"].Shopping[opName]
+        if opDetails then
+            -- Store all settings from the operation
+            operations[opName] = {}
+            for key, value in pairs(opDetails) do
+                operations[opName][key] = value
+            end
+        end
+    end
+    
+    return operations, groupPath
+end
+
+function FLIPR:TestTSMPriceEvaluation(itemID)
+    local testItems = {
+        14047,  -- Runecloth
+        2589,   -- Linen Cloth
+        4306,   -- Silk Cloth
+        2592,   -- Wool Cloth
+        4338,   -- Mageweave Cloth
+        2934,   -- Rugged Leather
+        2318,   -- Light Leather
+        4234    -- Heavy Leather
+    }
+    
+    if itemID then
+        testItems = {itemID}
+    end
+    
+    for _, id in ipairs(testItems) do
+        print("\n=== Testing TSM Price Evaluation for Item:", id, "===")
+        
+        local operations, groupPath = self:GetTSMShoppingOperations(id)
+        if operations then
+            print("Group Path:", groupPath)
+            for opName, opDetails in pairs(operations) do
+                print("\nOperation:", opName)
+                
+                -- Print all operation settings
+                for key, value in pairs(opDetails) do
+                    if type(value) == "table" then
+                        print("  " .. key .. ":")
+                        for subKey, subValue in pairs(value) do
+                            print("    " .. subKey .. ":", subValue)
+                        end
+                    else
+                        print("  " .. key .. ":", value)
+                    end
+                end
+                
+                -- Try to evaluate maxPrice and restockQuantity if they exist
+                if opDetails.maxPrice then
+                    local maxPrice = TSM_API.GetCustomPriceValue(opDetails.maxPrice, "i:" .. id)
+                    print("\n  Price String:", opDetails.maxPrice)
+                    print("  Evaluated maxPrice:", maxPrice and GetCoinTextureString(maxPrice) or "N/A")
+                    
+                    -- Debug all price sources used in the string
+                    print("\n  Individual Price Sources:")
+                    local sources = {
+                        maxstack = TSM_API.GetCustomPriceValue("maxstack", "i:" .. id),
+                        dbmarket = TSM_API.GetCustomPriceValue("DBMarket", "i:" .. id),
+                        dbregionmarketavg = TSM_API.GetCustomPriceValue("DBRegionMarketAvg", "i:" .. id),
+                        dbminbuyout = TSM_API.GetCustomPriceValue("DBMinBuyout", "i:" .. id),
+                        vendorbuy = TSM_API.GetCustomPriceValue("VendorBuy", "i:" .. id),
+                        vendorsell = TSM_API.GetCustomPriceValue("VendorSell", "i:" .. id),
+                        crafting = TSM_API.GetCustomPriceValue("Crafting", "i:" .. id),
+                        dbregionhistorical = TSM_API.GetCustomPriceValue("DBRegionHistorical", "i:" .. id),
+                        dbregionsaleavg = TSM_API.GetCustomPriceValue("DBRegionSaleAvg", "i:" .. id),
+                        salerate = TSM_API.GetCustomPriceValue("SaleRate*1000", "i:" .. id),
+                        dbregionsalerate = TSM_API.GetCustomPriceValue("DBRegionSaleRate*1000", "i:" .. id)
+                    }
+                    
+                    for name, value in pairs(sources) do
+                        if value then
+                            if name:match("rate") then
+                                print(string.format("    %s: %.3f", name, value/1000))
+                            else
+                                print("    " .. name .. ":", GetCoinTextureString(value))
+                            end
+                        else
+                            print("    " .. name .. ": nil")
+                        end
+                    end
+
+                    -- Debug intermediate calculations
+                    print("\n  Intermediate Calculations:")
+                    local itemString = "i:" .. id
+                    local tests = {
+                        ["max(dbregionsalerate,0.001)"] = TSM_API.GetCustomPriceValue("max(dbregionsalerate,0.001)", itemString),
+                        ["min(150%dbregionhistorical,dbregionmarketavg,250%dbregionsaleavg)"] = TSM_API.GetCustomPriceValue("min(150%dbregionhistorical,dbregionmarketavg,250%dbregionsaleavg)", itemString),
+                        ["min(1/salerate,1/dbregionsalerate,1000)"] = TSM_API.GetCustomPriceValue("min(1/salerate,1/dbregionsalerate,1000)", itemString),
+                        ["75%min(150%dbregionhistorical,dbregionmarketavg,250%dbregionsaleavg)"] = TSM_API.GetCustomPriceValue("75%min(150%dbregionhistorical,dbregionmarketavg,250%dbregionsaleavg)", itemString),
+                        ["60%vendorsell"] = TSM_API.GetCustomPriceValue("60%vendorsell", itemString),
+                        ["1s/maxstack"] = TSM_API.GetCustomPriceValue("1s/maxstack", itemString),
+                        ["max(1s/maxstack,60%vendorsell)"] = TSM_API.GetCustomPriceValue("max(1s/maxstack,60%vendorsell)", itemString),
+                        -- Add the full right side of the comparison
+                        ["75%min(150%dbregionhistorical,dbregionmarketavg,250%dbregionsaleavg)-min(1/salerate,1/dbregionsalerate,1000)*max(1s/maxstack,60%vendorsell)/0.95"] = TSM_API.GetCustomPriceValue("75%min(150%dbregionhistorical,dbregionmarketavg,250%dbregionsaleavg)-min(1/salerate,1/dbregionsalerate,1000)*max(1s/maxstack,60%vendorsell)/0.95", itemString),
+                        -- Add the full iflte comparison
+                        ["iflte(dbminbuyout,75%min(150%dbregionhistorical,dbregionmarketavg,250%dbregionsaleavg)-min(1/salerate,1/dbregionsalerate,1000)*max(1s/maxstack,60%vendorsell)/0.95)"] = TSM_API.GetCustomPriceValue("iflte(dbminbuyout,75%min(150%dbregionhistorical,dbregionmarketavg,250%dbregionsaleavg)-min(1/salerate,1/dbregionsalerate,1000)*max(1s/maxstack,60%vendorsell)/0.95)", itemString),
+                        -- Add the comparison values separately
+                        ["dbminbuyout"] = TSM_API.GetCustomPriceValue("dbminbuyout", itemString),
+                        ["rightside"] = TSM_API.GetCustomPriceValue("75%min(150%dbregionhistorical,dbregionmarketavg,250%dbregionsaleavg)-min(1/salerate,1/dbregionsalerate,1000)*max(1s/maxstack,60%vendorsell)/0.95", itemString)
+                    }
+                    
+                    -- Print comparison values first
+                    if tests["dbminbuyout"] and tests["rightside"] then
+                        print("\n  Comparison:")
+                        print(string.format("    dbminbuyout: %s", GetCoinTextureString(tests["dbminbuyout"])))
+                        print(string.format("    target price: %s", GetCoinTextureString(tests["rightside"])))
+                        print(string.format("    result: %s", tests["dbminbuyout"] <= tests["rightside"] and "true" or "false"))
+                        
+                        -- Add checks for outer conditions
+                        print("\n  Outer Conditions:")
+                        local maxstack = TSM_API.GetCustomPriceValue("maxstack", itemString)
+                        local salerate = TSM_API.GetCustomPriceValue("DBRegionSaleRate*1000", itemString)
+                        if salerate then salerate = salerate / 1000 end
+                        
+                        if maxstack then
+                            print(string.format("    maxstack > 1: %s", maxstack > 1 and "true" or "false"))
+                        else
+                            print("    maxstack > 1: nil (maxstack is nil)")
+                        end
+                        
+                        if salerate then
+                            print(string.format("    max(dbregionsalerate,0.001) >= 0.1: %s", math.max(salerate, 0.001) >= 0.1 and "true" or "false"))
+                        else
+                            print("    max(dbregionsalerate,0.001) >= 0.1: nil (salerate is nil)")
+                        end
+                    end
+                    
+                    print("\n  All Calculations:")
+                    
+                    for expr, value in pairs(tests) do
+                        if value then
+                            if expr:match("rate") then
+                                print(string.format("    %s = %.3f", expr, value))
+                            else
+                                print("    " .. expr .. " = " .. GetCoinTextureString(value))
+                            end
+                        else
+                            print("    " .. expr .. " = nil")
+                        end
+                    end
+                end
+                
+                if opDetails.restockQuantity then
+                    local restockQty = TSM_API.GetCustomPriceValue(opDetails.restockQuantity, "i:" .. id)
+                    print("\n  Quantity String:", opDetails.restockQuantity)
+                    print("  Evaluated restockQuantity:", restockQty or "N/A")
+                    print("  DBRegionSoldPerDay:", TSM_API.GetCustomPriceValue("DBRegionSoldPerDay", "i:" .. id) or "N/A")
+                end
+            end
+        else
+            print("No operations found for item", id)
+        end
+    end
+    
+    print("\n=== Test Complete ===")
+end
+
 -- Register our event handler
 FLIPR:RegisterEvent("PLAYER_LOGIN", function()
-    FLIPR:GetTSMGroups()
+    -- Test the price evaluation with all items
+    FLIPR:TestTSMPriceEvaluation()
 end)
 
 function FLIPR:OnInitialize()

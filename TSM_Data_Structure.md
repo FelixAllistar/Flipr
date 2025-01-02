@@ -74,6 +74,26 @@ Example:
    - For each operation name, look up its settings in `userData@operations`
    - Access specific settings like maxPrice, minPrice, restockQuantity, etc.
 
+## TSM Price Sources and Evaluation
+
+### Sale Rate Handling
+When working with sale rates in TSM:
+1. **Individual Rate Values**:
+   - When getting a single rate value (like dbregionsalerate), multiply by 1000
+   - Then divide by 1000 when displaying
+   - Example: `TSM_API.GetCustomPriceValue("DBRegionSaleRate*1000", itemString) / 1000`
+
+2. **Complex Price Strings**:
+   - When rates are used in price strings (like shopping operations), no multiplication needed
+   - TSM handles the rate scaling internally in price string evaluation
+   - Example: `ifgte(max(dbregionsalerate,0.001),0.1,...)` works without modification
+
+### Price String Evaluation
+- Use `TSM_API.GetCustomPriceValue(priceString, itemString)` for evaluation
+- Returns nil when conditions aren't met (intentional "no" signal)
+- Returns copper value when evaluation succeeds
+- Example: `TSM_API.GetCustomPriceValue("min(dbmarket,dbregionmarketavg)", "i:2589")`
+
 ## Example Operation Types
 
 ### Shopping Operations
@@ -99,4 +119,5 @@ Example:
 - All paths in group hierarchies use backticks (`) as separators
 - Operations can be overridden at any level in the group hierarchy
 - Price strings can use TSM's price sources (dbmarket, dbregionmarketavg, etc.)
-- Some operations have module-specific settings not listed here 
+- Some operations have module-specific settings not listed here
+- Sale rates require special handling with *1000 multiplier when used individually 
