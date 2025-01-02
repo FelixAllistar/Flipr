@@ -1134,7 +1134,7 @@ function FLIPR:CreateProfitableItemRow(flipOpportunity, results)
     -- Sale Rate text (raw value from TSM)
     local saleRateText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     saleRateText:SetPoint("LEFT", stockText, "RIGHT", 10, 0)
-    saleRateText:SetText(string.format("%.3f", flipOpportunity.saleRate))  -- Force 3 decimal places
+    saleRateText:SetText(string.format("%.3f", flipOpportunity.marketData.saleRate))
     
     -- Profit text with ROI
     local profitText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")

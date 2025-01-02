@@ -7,10 +7,19 @@ addon.FLIPR = FLIPR
 local version = C_AddOns.GetAddOnMetadata(addonName, "Version") or "v0.070"
 addon.version = version  -- Make version accessible to other files
 
+-- Define default settings
 local defaultSettings = {
-    showConfirm = true,
-    enabledGroups = {},  -- Will be populated with TSM groups
-    expandedGroups = {}  -- Track which groups are expanded in the UI
+    -- UI settings
+    expandedGroups = {},  -- Track which groups are expanded in the UI
+    enabledGroups = {},   -- Track which groups are enabled
+    -- Inventory control settings
+    
+    -- Profitability settings
+    minProfit = 1,         -- 1g minimum profit
+    highVolumeROI = 15,    -- 15% for fast movers
+    mediumVolumeROI = 25,  -- 25% for regular items
+    lowVolumeROI = 40,     -- 40% for slow movers
+    veryLowVolumeROI = 70, -- 70% for very slow movers
 }
 
 -- Helper function to get TSM group path for an item
@@ -29,10 +38,17 @@ function FLIPR:GetTSMGroupOperations(groupPath)
     local ops = {}
     for moduleName, moduleData in pairs(operationsTable[groupPath]) do
         if type(moduleData) == "table" then
-            ops[moduleName] = {
-                override = moduleData.override,
-                operations = moduleData
-            }
+            -- The operations are directly in the moduleData table as numbered indices
+            local operations = {}
+            for i, op in ipairs(moduleData) do
+                table.insert(operations, op)
+            end
+            if #operations > 0 then
+                ops[moduleName] = {
+                    override = moduleData.override,
+                    operations = operations
+                }
+            end
         end
     end
     return ops
@@ -121,14 +137,9 @@ end
 
 -- Initialize addon
 function FLIPR:OnInitialize()
-    -- Initialize saved variables
+    -- Initialize saved variables with AceDB
     self.db = LibStub("AceDB-3.0"):New("FliprDB", {
         profile = defaultSettings
-    })
-    
-    -- Initialize settings
-    self.settings = LibStub("AceDB-3.0"):New("FliprSettings", {
-        profile = {}
     })
 end
 

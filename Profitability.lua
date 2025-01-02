@@ -13,22 +13,25 @@ function FLIPR:GetTSMValue(source, itemString, needsDecimalConversion)
 end
 
 function FLIPR:GetItemSaleRate(itemID)
-    -- Backward compatibility function
     local itemString = TSM_API.ToItemString("i:" .. itemID)
     return self:GetTSMValue("DBRegionSaleRate*1000", itemString, true)
 end
 
 function FLIPR:GetMaxInventoryForSaleRate(itemID)
-    local itemString = TSM_API.ToItemString("i:" .. itemID)
-    local saleRate = self:GetTSMValue("DBRegionSaleRate*1000", itemString, true)
+    -- Get TSM shopping operations for this item
+    local operations = self:GetTSMShoppingOperations(itemID)
+    if not operations or #operations == 0 then return 0 end
     
-    if saleRate >= self.db.highSaleRate then
-        return self.db.highInventory
-    elseif saleRate >= self.db.mediumSaleRate then
-        return self.db.mediumInventory
-    else
-        return self.db.lowInventory
-    end
+    -- Use the first operation's restockQuantity
+    -- TSM only uses the first operation for shopping
+    local restockQuantity = operations[1].restockQuantity
+    if not restockQuantity then return 0 end
+    
+    -- Evaluate the restock quantity string
+    local itemString = TSM_API.ToItemString("i:" .. itemID)
+    local maxQuantity = TSM_API.GetCustomPriceValue(restockQuantity, itemString)
+    
+    return maxQuantity or 0
 end
 
 function FLIPR:GetCurrentInventory(itemID)
@@ -79,7 +82,14 @@ end
 
 function FLIPR:AnalyzeMarketConditions(itemID)
     local itemString = TSM_API.ToItemString("i:" .. itemID)
-    if not itemString then return nil end
+    
+    -- Get TSM shopping operations for this item
+    local operations = self:GetTSMShoppingOperations(itemID)
+    if not operations or #operations == 0 then return nil end
+    
+    -- Use the first operation's maxPrice
+    local maxPrice = operations[1].maxPrice
+    if not maxPrice then return nil end
     
     -- Get price sources (with proper decimal handling)
     local regionMarket = self:GetTSMValue("DBRegionMarketAvg*1000", itemString, true)
@@ -87,6 +97,13 @@ function FLIPR:AnalyzeMarketConditions(itemID)
     local historical = self:GetTSMValue("DBRegionHistorical*1000", itemString, true)
     local saleRate = self:GetTSMValue("DBRegionSaleRate*1000", itemString, true)
     local soldPerDay = self:GetTSMValue("DBRegionSoldPerDay", itemString, false)
+    
+    -- Get the evaluated maxPrice from TSM
+    local evaluatedMaxPrice = TSM_API.GetCustomPriceValue(maxPrice, itemString)
+    print(string.format("DEBUG: MaxPrice for %s: %s", GetItemInfo(itemID) or itemID, GetCoinTextureString(evaluatedMaxPrice or 0)))
+    
+    -- If evaluation fails, use 0 instead of nil
+    evaluatedMaxPrice = evaluatedMaxPrice or 0
     
     -- Market stability check
     local marketStability = localMarket / regionMarket
@@ -108,7 +125,8 @@ function FLIPR:AnalyzeMarketConditions(itemID)
         soldPerDay = soldPerDay,
         saleCategory = saleCategory,
         localMarket = localMarket,
-        regionMarket = regionMarket
+        regionMarket = regionMarket,
+        maxPrice = evaluatedMaxPrice
     }
 end
 
@@ -191,22 +209,30 @@ function FLIPR:AnalyzeFlipOpportunity(results, itemID)
     local itemName = GetItemInfo(itemID)
     if not itemName then return nil end
     
-    -- Get market conditions
+    -- Get market conditions (includes TSM maxPrice)
     local marketData = self:AnalyzeMarketConditions(itemID)
-    if not marketData then return nil end
+    if not marketData then 
+        print(string.format("|cFFFFFF00No TSM shopping operation found for %s|r", itemName))
+        return nil 
+    end
     
-    -- Get inventory limits using direct TSM sale rate
+    -- Get inventory limits from TSM operation
     local maxInventory = self:GetMaxInventoryForSaleRate(itemID)
+    if maxInventory == 0 then
+        print(string.format("|cFFFFFF00No restock quantity defined for %s|r", itemName))
+        return nil
+    end
+    
     local currentInventory = self:GetCurrentInventory(itemID)
     local roomForMore = maxInventory - currentInventory
     
     if roomForMore <= 0 then
         print(string.format(
-            "|cFFFF0000Skipping %s - Already have %d/%d (Sale Rate: %s)|r",
+            "|cFFFF0000Skipping %s - Already have %d/%d (Sale Rate: %.3f)|r",
             itemName,
             currentInventory,
             maxInventory,
-            tostring(marketData.saleRate)
+            marketData.saleRate
         ))
         return nil
     end
@@ -231,13 +257,21 @@ function FLIPR:AnalyzeFlipOpportunity(results, itemID)
     local profitableAuctions = {}
     local ahCut = 0.05  -- 5% AH fee
     
-    -- Get required ROI for this item
-    local requiredROI = self:CalculateRequiredROI(marketData, itemID)
-    
     for i = 1, #results-1 do
         local buyPrice = results[i].minPrice
         local nextPrice = results[i+1].minPrice
         local quantity = results[i].totalQuantity
+        
+        -- Skip if buyPrice is above TSM's maxPrice
+        if buyPrice > marketData.maxPrice then
+            print(string.format(
+                "|cFFFFFF00Skipping %s - Price %s above maxPrice %s|r",
+                itemName,
+                GetCoinTextureString(buyPrice),
+                GetCoinTextureString(marketData.maxPrice)
+            ))
+            break  -- No point checking further auctions as they'll be more expensive
+        end
         
         -- Calculate deposit for posting duration (12 hours = 1, 24 hours = 2, 48 hours = 3)
         local deposit = self:CalculateDeposit(itemID, 1, quantity, isCommodity)
@@ -247,9 +281,9 @@ function FLIPR:AnalyzeFlipOpportunity(results, itemID)
         local roi = (potentialProfit / buyPrice) * 100
         
         -- Check both ROI and minimum profit requirements
-        local minProfitInCopper = self.db.minProfit * 10000  -- Convert gold to copper (1g = 10000c)
+        local minProfitInCopper = self.db.profile.minProfit * 10000  -- Convert gold to copper (1g = 10000c)
         
-        if roi >= requiredROI and potentialProfit >= minProfitInCopper then
+        if potentialProfit >= minProfitInCopper and roi >= self.db.profile.highVolumeROI then
             -- Check if this is a flash sale opportunity
             local isFlash = self:IsFlashSale(buyPrice, marketData)
             
@@ -288,10 +322,13 @@ function FLIPR:AnalyzeFlipOpportunity(results, itemID)
             deposit = bestAuction.deposit,
             auctionIndex = bestAuction.auctionIndex,
             isCommodity = isCommodity,
-            marketData = marketData
+            marketData = marketData,
+            currentInventory = currentInventory,
+            maxInventory = maxInventory
         }
     end
     
+    print(string.format("|cFFFFFF00No profitable flip found for %s|r", itemName))
     return nil
 end
 
