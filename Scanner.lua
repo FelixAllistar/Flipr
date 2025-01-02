@@ -259,13 +259,17 @@ function FLIPR:ScanNextItem()
     -- Continue with normal scanning
     if self.currentScanIndex <= #self.itemIDs then
         local itemID = self.itemIDs[self.currentScanIndex]
-        local itemData = self.itemDB[itemID]
         
-        -- Check if we have data for this item
-        if not itemData then
-            print(string.format("|cFFFF0000Item %d not found in database, skipping|r", itemID))
-            self.currentScanIndex = self.currentScanIndex + 1
-            C_Timer.After(0.5, function() self:ScanNextItem() end)
+        -- Get item info
+        local itemName = GetItemInfo(itemID)
+        if not itemName then
+            -- Queue item info request and retry
+            local item = Item:CreateFromItemID(itemID)
+            item:ContinueOnItemLoad(function()
+                if self.isScanning and not self.isPaused then
+                    self:ScanNextItem()
+                end
+            end)
             return
         end
         
@@ -275,9 +279,9 @@ function FLIPR:ScanNextItem()
                 self.currentScanIndex, #self.itemIDs))
         end
         
-        -- Always print scanning message first
+        -- Print scanning message
         print(string.format("|cFFFFFFFFScanning item %d/%d: %s (%d)|r", 
-            self.currentScanIndex, #self.itemIDs, itemData.name, itemID))
+            self.currentScanIndex, #self.itemIDs, itemName, itemID))
 
         -- Check if item is a commodity using AH API
         local itemKey = C_AuctionHouse.MakeItemKey(itemID)
@@ -322,7 +326,7 @@ function FLIPR:ScanNextItem()
         
         -- Debug print commodity status
         if itemInfo.isCommodity then
-            print(string.format("|cFF00FFFFItem is a commodity: %s|r", itemData.name))
+            print(string.format("|cFF00FFFFItem is a commodity: %s|r", itemName))
             -- For commodities, use specific commodity search
             C_AuctionHouse.SendSearchQuery(itemKey, {
                 searchString = "",
@@ -338,7 +342,7 @@ function FLIPR:ScanNextItem()
                 onlyUsable = false
             }, true)
         else
-            print(string.format("|cFFFF00FFItem is NOT a commodity: %s|r", itemData.name))
+            print(string.format("|cFFFF00FFItem is NOT a commodity: %s|r", itemName))
             -- For regular items, use item search
             C_AuctionHouse.SendSearchQuery(itemKey, {
                 searchString = "",
@@ -569,13 +573,6 @@ function FLIPR:ProcessAuctionResults(results)
         return
     end
     
-    -- Debug print for database lookup
-    local itemData = self.itemDB[itemID]
-    if not itemData then 
-        print(string.format("|cFFFF0000No item data found in database for: %s (ID: %d)|r", itemName, itemID))
-        return 
-    end
-    
     -- Get sale rate for debug output
     local saleRate = self:GetItemSaleRate(itemID)
     
@@ -602,7 +599,6 @@ function FLIPR:ProcessAuctionResults(results)
             "|cFFFFFF00No profitable flip found for %s (Sale Rate: %s)|r",
             itemName,
             tostring(saleRate)
-            
         ))
     end
 end

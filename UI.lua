@@ -429,7 +429,9 @@ function FLIPR:RefreshGroupList()
 end
 
 function FLIPR:UpdateScanItems()
+    -- Reset scan items
     self.itemIDs = {}
+    local processedItems = {}  -- Track items we've already added
     
     -- Get all enabled groups
     for groupPath, enabled in pairs(self.db.profile.enabledGroups) do
@@ -437,13 +439,36 @@ function FLIPR:UpdateScanItems()
             -- Get all items in this TSM group
             local items = self:GetTSMGroupItems(groupPath)
             for itemID in pairs(items) do
-                table.insert(self.itemIDs, itemID)
+                if not processedItems[itemID] then
+                    -- Create item info
+                    local itemName = GetItemInfo(itemID)
+                    if itemName then
+                        table.insert(self.itemIDs, itemID)
+                        processedItems[itemID] = true
+                        print(string.format("Added item to scan list: %d - %s from group %s", 
+                            itemID, itemName, groupPath))
+                    else
+                        -- Queue item info request
+                        local item = Item:CreateFromItemID(itemID)
+                        item:ContinueOnItemLoad(function()
+                            if not processedItems[itemID] then
+                                table.insert(self.itemIDs, itemID)
+                                processedItems[itemID] = true
+                                print(string.format("Added item to scan list (after load): %d - %s from group %s", 
+                                    itemID, item:GetItemName(), groupPath))
+                            end
+                        end)
+                    end
+                end
             end
         end
     end
     
     -- Sort itemIDs for consistent scanning order
     table.sort(self.itemIDs)
+    
+    -- Print summary
+    print(string.format("Total unique items in scan list: %d", #self.itemIDs))
     
     -- Reset scan state
     self.currentScanIndex = 1
@@ -456,6 +481,9 @@ function FLIPR:UpdateScanItems()
             child:SetParent(nil)
         end
     end
+    
+    -- Return the number of items to be scanned
+    return #self.itemIDs
 end
 
 function FLIPR:CreateGroupCheckbox(parent, text, groupPath, level)

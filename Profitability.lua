@@ -188,8 +188,8 @@ end
 
 function FLIPR:AnalyzeFlipOpportunity(results, itemID)
     -- Initial checks...
-    local itemData = self.itemDB[itemID]
-    if not itemData then return nil end
+    local itemName = GetItemInfo(itemID)
+    if not itemName then return nil end
     
     -- Get market conditions
     local marketData = self:AnalyzeMarketConditions(itemID)
@@ -203,7 +203,7 @@ function FLIPR:AnalyzeFlipOpportunity(results, itemID)
     if roomForMore <= 0 then
         print(string.format(
             "|cFFFF0000Skipping %s - Already have %d/%d (Sale Rate: %s)|r",
-            GetItemInfo(itemID) or itemID,
+            itemName,
             currentInventory,
             maxInventory,
             tostring(marketData.saleRate)
@@ -215,7 +215,7 @@ function FLIPR:AnalyzeFlipOpportunity(results, itemID)
     if results[1].totalQuantity > roomForMore then
         print(string.format(
             "|cFFFF0000Skipping %s - First auction quantity (%d) exceeds our limit (%d)|r",
-            GetItemInfo(itemID) or itemID,
+            itemName,
             results[1].totalQuantity,
             roomForMore
         ))
@@ -248,63 +248,51 @@ function FLIPR:AnalyzeFlipOpportunity(results, itemID)
         
         -- Check both ROI and minimum profit requirements
         local minProfitInCopper = self.db.minProfit * 10000  -- Convert gold to copper (1g = 10000c)
-        if potentialProfit >= minProfitInCopper and roi >= requiredROI then
+        
+        if roi >= requiredROI and potentialProfit >= minProfitInCopper then
+            -- Check if this is a flash sale opportunity
+            local isFlash = self:IsFlashSale(buyPrice, marketData)
+            
+            -- Add to profitable auctions
             table.insert(profitableAuctions, {
-                index = i,
                 buyPrice = buyPrice,
                 sellPrice = nextPrice,
                 quantity = quantity,
                 profit = potentialProfit,
+                roi = roi,
+                isFlashSale = isFlash,
                 deposit = deposit,
-                roi = roi
+                auctionIndex = i
             })
-        else
-            -- Stop looking once we find unprofitable price points
-            break
+            
+            -- For commodities, we can only buy the first auction
+            if isCommodity then break end
         end
     end
     
-    if #profitableAuctions == 0 then
-        return nil
+    -- If we found profitable auctions, return the best one
+    if #profitableAuctions > 0 then
+        -- Sort by ROI
+        table.sort(profitableAuctions, function(a, b) return a.roi > b.roi end)
+        
+        local bestAuction = profitableAuctions[1]
+        return {
+            itemID = itemID,
+            itemName = itemName,
+            avgBuyPrice = bestAuction.buyPrice,
+            buyQuantity = bestAuction.quantity,
+            sellPrice = bestAuction.sellPrice,
+            totalProfit = bestAuction.profit,
+            roi = bestAuction.roi,
+            isFlashSale = bestAuction.isFlashSale,
+            deposit = bestAuction.deposit,
+            auctionIndex = bestAuction.auctionIndex,
+            isCommodity = isCommodity,
+            marketData = marketData
+        }
     end
     
-    -- Take the first profitable auction group
-    local bestDeal = profitableAuctions[1]
-    local buyQuantity = math.min(roomForMore, bestDeal.quantity)
-    
-    -- Debug output with deposit info
-    print(string.format(
-        "Analysis for %s:\n" ..
-        "- Buy price: %s\n" ..
-        "- Sell price: %s\n" ..
-        "- Deposit cost: %s\n" ..
-        "- Profit per item: %s\n" ..
-        "- ROI: %.2f%%\n" ..
-        "- Can buy: %d/%d",
-        GetItemInfo(itemID) or itemID,
-        GetCoinTextureString(bestDeal.buyPrice),
-        GetCoinTextureString(bestDeal.sellPrice),
-        GetCoinTextureString(bestDeal.deposit),
-        GetCoinTextureString(bestDeal.profit),
-        bestDeal.roi,
-        buyQuantity,
-        bestDeal.quantity
-    ))
-    
-    return {
-        numAuctions = 1,
-        buyQuantity = buyQuantity,
-        avgBuyPrice = bestDeal.buyPrice,
-        sellPrice = bestDeal.sellPrice,
-        deposit = bestDeal.deposit,
-        totalProfit = bestDeal.profit * buyQuantity,
-        profitPerItem = bestDeal.profit,
-        roi = bestDeal.roi,
-        currentInventory = currentInventory,
-        maxInventory = maxInventory,
-        saleRate = marketData.saleRate,
-        totalAvailable = bestDeal.quantity
-    }
+    return nil
 end
 
 function FLIPR:AnalyzeMarketDepth(itemID)
