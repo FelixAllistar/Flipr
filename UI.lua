@@ -208,198 +208,254 @@ function FLIPR:CreateResultsSection(parent)
 end
 
 function FLIPR:CreateGroupButtons(parent)
-    -- print("=== CreateGroupButtons START ===")
     -- Store reference to the group frame
     self.groupFrame = parent
     
-    -- Build group structure
+    -- Get TSM groups
+    local tsmGroups = self:GetTSMGroups()
+    
+    -- Build group structure from TSM groups
     self.groupStructure = {}
-    -- print("Building group structure from available groups:")
-    for groupName, groupData in pairs(self.availableGroups) do
-        -- print(string.format("Processing root group: %s", groupName))
-        self.groupStructure[groupName] = self:BuildGroupStructure(groupData)
+    
+    -- Helper function to ensure parent groups exist
+    local function ensureParentGroups(path)
+        local parts = {strsplit("`", path)}
+        local currentPath = ""
+        local currentNode = self.groupStructure
+        
+        for i, part in ipairs(parts) do
+            if i == 1 then
+                currentPath = part
+                if not currentNode[part] then
+                    currentNode[part] = {
+                        name = part,
+                        path = currentPath,
+                        children = {}
+                    }
+                end
+                currentNode = currentNode[part].children
+            else
+                currentPath = currentPath .. "`" .. part
+                if not currentNode[part] then
+                    currentNode[part] = {
+                        name = part,
+                        path = currentPath,
+                        children = {}
+                    }
+                end
+                currentNode = currentNode[part].children
+            end
+        end
+    end
+    
+    -- Build hierarchical structure
+    for groupPath in pairs(tsmGroups) do
+        ensureParentGroups(groupPath)
     end
     
     -- Create checkboxes
     self:RefreshGroupList()
-    -- print("=== CreateGroupButtons END ===")
 end
 
-function FLIPR:GetAvailableGroups()
-    print("=== GetAvailableGroups START ===")
+function FLIPR:GetTSMGroups()
+    if not TradeSkillMasterDB then return {} end
+    
+    local itemsTable = TradeSkillMasterDB["p@Default@userData@items"]
+    if not itemsTable then return {} end
+    
+    -- Build a table of unique groups
     local groups = {}
-    
-    -- Check if FliprDB exists
-    if not FliprDB then
-        print("ERROR: FliprDB is nil!")
-        return groups
-    end
-    
-    if not FliprDB.groups then
-        print("ERROR: FliprDB.groups is nil!")
-        return groups
-    end
-    
-    print("Found groups in FliprDB:")
-    for groupName, groupData in pairs(FliprDB.groups) do
-        print(string.format("  Group: %s", groupName))
-        if groupData.children then
-            for childName, _ in pairs(groupData.children) do
-                print(string.format("    - Child: %s", childName))
+    for _, groupPath in pairs(itemsTable) do
+        -- Split the path into parts
+        local parts = {strsplit("`", groupPath)}
+        local currentPath = ""
+        
+        -- Add each level of the group hierarchy
+        for i, part in ipairs(parts) do
+            if i == 1 then
+                currentPath = part
+            else
+                currentPath = currentPath .. "`" .. part
             end
+            groups[currentPath] = true
         end
     end
     
-    print("=== GetAvailableGroups END ===")
-    return FliprDB.groups
+    return groups
 end
 
-function FLIPR:GetItemsFromGroup(groupData, path)
+function FLIPR:GetTSMGroupItems(groupPath)
+    if not TradeSkillMasterDB then return {} end
+    
+    local itemsTable = TradeSkillMasterDB["p@Default@userData@items"]
+    if not itemsTable then return {} end
+    
     local items = {}
-    
-    -- Helper function to recursively collect items
-    local function collectItems(node)
-        -- Add items from current node
-        if node.items then
-            for itemId, itemData in pairs(node.items) do
-                items[itemId] = itemData
-            end
-        end
-        
-        -- Recursively process children
-        if node.children then
-            for _, childNode in pairs(node.children) do
-                collectItems(childNode)
+    for itemString, path in pairs(itemsTable) do
+        if path == groupPath or path:match("^" .. groupPath .. "`") then
+            local itemID = itemString:match("i:(%d+)")
+            if itemID then
+                items[tonumber(itemID)] = true
             end
         end
     end
     
-    -- If no path specified, collect all items recursively
-    if not path then
-        collectItems(groupData)
-        return items
-    end
-    
-    -- Navigate to specific path
-    local currentNode = groupData
-    local pathParts = {strsplit("/", path)}
-    
-    for _, part in ipairs(pathParts) do
-        if currentNode.children and currentNode.children[part] then
-            currentNode = currentNode.children[part]
-        else
-            return {}  -- Path not found
-        end
-    end
-    
-    -- Collect items from the specified path
-    collectItems(currentNode)
     return items
 end
 
-function FLIPR:BuildGroupStructure(groupData)
-    if not groupData then
-        -- print("ERROR: Received nil groupData in BuildGroupStructure")
-        return nil
-    end
-    
-    -- print(string.format("Building structure for: %s", groupData.name or "unnamed group"))
-    local structure = {
-        name = groupData.name,
-        children = {},
-        items = groupData.items or {}
-    }
-    
-    -- Process children
-    if groupData.children then
-        -- print("  Processing children:")
-        for childName, childData in pairs(groupData.children) do
-            -- print(string.format("    Child: %s", childName))
-            structure.children[childName] = self:BuildGroupStructure(childData)
-        end
-    else
-        -- print("  No children found")
-    end
-    
-    return structure
-end
-
 function FLIPR:RefreshGroupList()
-    -- print("=== RefreshGroupList START ===")
-    if not self.groupFrame then 
-        -- print("ERROR: No group frame found!")
-        return 
-    end
+    if not self.groupFrame then return end
     
-    -- print("Clearing existing checkboxes")
+    -- Clear existing buttons
     for _, child in pairs({self.groupFrame:GetChildren()}) do
         child:Hide()
         child:SetParent(nil)
     end
     
-    local yOffset = -10
+    local yOffset = -5
     
-    -- Create sorted array of root groups
-    local sortedGroups = {}
-    for groupName, structure in pairs(self.groupStructure) do
-        table.insert(sortedGroups, {name = groupName, data = structure})
-    end
-    
-    -- Sort alphabetically by group name
-    table.sort(sortedGroups, function(a, b)
-        return a.name < b.name
-    end)
-    
-    -- Helper function to add groups recursively
-    local function addGroups(node, prefix, level)
-        if not node then 
-            -- print("ERROR: Nil node encountered")
-            return yOffset 
-        end
+    -- Helper function to create group checkbox with expand button
+    local function createGroupCheckbox(name, path, parent, level)
+        -- Create container frame
+        local container = CreateFrame("Frame", nil, parent)
+        container:SetSize(parent:GetWidth(), 24)
+        container:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, yOffset)
         
-        -- print(string.format("Processing node: %s (level %d)", node.name or "unnamed", level))
-        
-        -- Create checkbox for current node if it has a name
-        if node.name then
-            local fullPath = prefix and (prefix .. "/" .. node.name) or node.name
-            local displayName = node.name
-            
-            -- print(string.format("Creating checkbox for '%s' at level %d (path: %s)", displayName, level, fullPath))
-            local container, expandButton = self:CreateGroupCheckbox(self.groupFrame, displayName, fullPath, level)
-            container:SetPoint("TOPLEFT", self.groupFrame, "TOPLEFT", 0, yOffset)
-            
-            -- Update yOffset for next item
-            yOffset = yOffset - 25
-            
-            -- If expanded and has children, add them
-            if self.db.expandedGroups[fullPath] and node.children and next(node.children) then
-                -- print(string.format("  Expanding children of %s", fullPath))
-                for childName, childNode in pairs(node.children) do
-                    -- print(string.format("    Processing child: %s", childName))
-                    yOffset = addGroups(childNode, fullPath, level + 1)
-                end
-            else
-                -- print(string.format("  Group %s is collapsed or has no children", fullPath))
+        -- Check if this group has any children
+        local hasChildren = false
+        for checkPath in pairs(self:GetTSMGroups()) do
+            if checkPath:match("^" .. path .. "`") then
+                hasChildren = true
+                break
             end
-        else
-            -- print("WARNING: Node has no name, skipping")
         end
         
-        return yOffset
+        -- Create expand button only if the group has children
+        local expandButton = CreateFrame("Button", nil, container)
+        expandButton:SetSize(16, 16)
+        expandButton:SetPoint("LEFT", container, "LEFT", level * 15, 0)
+        
+        local expandTexture = expandButton:CreateTexture(nil, "ARTWORK")
+        expandTexture:SetAllPoints()
+        
+        if hasChildren then
+            local isExpanded = self.db.profile.expandedGroups[path] or false
+            expandTexture:SetTexture(isExpanded and "Interface\\Buttons\\UI-MinusButton-Up" or "Interface\\Buttons\\UI-PlusButton-Up")
+            
+            -- Expand button scripts
+            expandButton:SetScript("OnClick", function()
+                self.db.profile.expandedGroups[path] = not self.db.profile.expandedGroups[path]
+                self:RefreshGroupList()
+            end)
+        else
+            expandTexture:SetTexture(nil)
+            expandButton:SetScript("OnClick", nil)
+        end
+        
+        -- Create checkbox
+        local checkbox = CreateFrame("CheckButton", nil, container, "UICheckButtonTemplate")
+        checkbox:SetPoint("LEFT", expandButton, "RIGHT", 2, 0)
+        checkbox:SetSize(24, 24)
+        
+        -- Create label
+        local label = checkbox:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        label:SetPoint("LEFT", checkbox, "RIGHT", 5, 0)
+        label:SetText(name)
+        
+        -- Set initial states
+        checkbox:SetChecked(self.db.profile.enabledGroups[path] or false)
+        
+        -- Checkbox scripts
+        checkbox:SetScript("OnClick", function(self)
+            local checked = self:GetChecked()
+            FLIPR.db.profile.enabledGroups[path] = checked
+            
+            -- Recursively set all children
+            local function setChildrenState(nodePath, state)
+                for childPath in pairs(FLIPR:GetTSMGroups()) do
+                    if childPath:match("^" .. nodePath .. "`") then
+                        FLIPR.db.profile.enabledGroups[childPath] = state
+                    end
+                end
+            end
+            
+            setChildrenState(path, checked)
+            
+            -- Update scan items
+            if FLIPR.UpdateScanItems then
+                FLIPR:UpdateScanItems()
+            end
+            
+            -- Refresh to update child checkboxes
+            FLIPR:RefreshGroupList()
+        end)
+        
+        -- Create highlight
+        local highlight = checkbox:CreateTexture(nil, "HIGHLIGHT")
+        highlight:SetAllPoints(label)
+        highlight:SetColorTexture(1, 1, 1, 0.2)
+        highlight:SetBlendMode("ADD")
+        
+        yOffset = yOffset - 25
+        return container, hasChildren and (self.db.profile.expandedGroups[path] or false)
     end
     
-    -- Process groups in sorted order
-    -- print("Processing available groups:")
-    for _, groupInfo in ipairs(sortedGroups) do
-        -- print(string.format("Processing root group: %s", groupInfo.name))
-        yOffset = addGroups(groupInfo.data, nil, 0)
+    -- Recursive function to create group hierarchy
+    local function createGroupHierarchy(node, parent, level)
+        if not node then return end
+        
+        -- Sort groups alphabetically
+        local sortedGroups = {}
+        for name, data in pairs(node) do
+            table.insert(sortedGroups, {name = name, data = data})
+        end
+        table.sort(sortedGroups, function(a, b) return a.name < b.name end)
+        
+        for _, group in ipairs(sortedGroups) do
+            local container, isExpanded = createGroupCheckbox(group.name, group.data.path, parent, level)
+            
+            -- If expanded and has children, create them
+            if isExpanded and group.data.children and next(group.data.children) then
+                createGroupHierarchy(group.data.children, parent, level + 1)
+            end
+        end
     end
     
-    -- Update parent frame height
-    local newHeight = math.abs(yOffset) + 10
-    -- print(string.format("Setting group frame height to: %d", newHeight))
-    self.groupFrame:SetHeight(newHeight)
-    -- print("=== RefreshGroupList END ===")
+    -- Create all group checkboxes
+    createGroupHierarchy(self.groupStructure, self.groupFrame, 0)
+    
+    -- Update frame height
+    self.groupFrame:SetHeight(math.abs(yOffset) + 5)
+end
+
+function FLIPR:UpdateScanItems()
+    self.itemIDs = {}
+    
+    -- Get all enabled groups
+    for groupPath, enabled in pairs(self.db.profile.enabledGroups) do
+        if enabled then
+            -- Get all items in this TSM group
+            local items = self:GetTSMGroupItems(groupPath)
+            for itemID in pairs(items) do
+                table.insert(self.itemIDs, itemID)
+            end
+        end
+    end
+    
+    -- Sort itemIDs for consistent scanning order
+    table.sort(self.itemIDs)
+    
+    -- Reset scan state
+    self.currentScanIndex = 1
+    
+    -- Clear results display
+    if self.scrollChild then
+        self.scrollChild:SetHeight(1)
+        for _, child in pairs({self.scrollChild:GetChildren()}) do
+            child:Hide()
+            child:SetParent(nil)
+        end
+    end
 end
 
 function FLIPR:CreateGroupCheckbox(parent, text, groupPath, level)

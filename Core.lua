@@ -7,88 +7,77 @@ addon.FLIPR = FLIPR
 local version = C_AddOns.GetAddOnMetadata(addonName, "Version") or "v0.070"
 addon.version = version  -- Make version accessible to other files
 
--- Default scan items
-local defaultItems = {
-    "Light Leather",
-    "Medium Leather"
-}
-
 local defaultSettings = {
-    items = defaultItems,
     showConfirm = true,
-    enabledGroups = {},  -- Will be populated dynamically
+    enabledGroups = {},  -- Will be populated with TSM groups
     expandedGroups = {}  -- Track which groups are expanded in the UI
 }
 
-function FLIPR:GetAvailableGroups()
-    local groups = {}
-    print("Scanning for available groups...")
-    -- Look for FLIPR_ tables in _G
-    for name, value in pairs(_G) do
-        if type(value) == "table" and name:match("^FLIPR_") then
-            print("Found group table:", name)
-            -- Store reference to the table
-            groups[name] = value
-        end
-    end
-    print("Total group tables found:", #groups)
-    return groups
+-- Helper function to get TSM group path for an item
+function FLIPR:GetTSMGroupPath(itemID)
+    if not TradeSkillMasterDB then return nil end
+    local itemString = "i:" .. itemID
+    return TradeSkillMasterDB["p@Default@userData@items"][itemString]
 end
 
-function FLIPR:GetItemsFromGroup(groupTable, path)
-    local items = {}
-    local currentTable = groupTable
-    
-    -- If no path specified, return all items recursively
-    if not path then
-        if currentTable.items then
-            for itemId, itemData in pairs(currentTable.items) do
-                items[itemId] = itemData
-            end
-        end
-        -- Recursively get items from subgroups
-        for key, value in pairs(currentTable) do
-            if type(value) == "table" and key ~= "items" and key ~= "name" then
-                local subItems = self:GetItemsFromGroup(value)
-                for itemId, itemData in pairs(subItems) do
-                    items[itemId] = itemData
-                end
-            end
-        end
-        return items
-    end
-    
-    -- Navigate through the path
-    local pathParts = {strsplit("/", path)}
-    for _, part in ipairs(pathParts) do
-        if currentTable[part] then
-            currentTable = currentTable[part]
-        else
-            return {}  -- Path not found
-        end
-    end
-    
-    -- Return items from this level and below
-    return self:GetItemsFromGroup(currentTable)
-end
-
-function FLIPR:GetTSMGroups()
-    print("=== GetAvailableGroups START ===")
-    -- Check for TSM's database
-    if not TradeSkillMasterDB then
-        print("TSM database not found")
-        return
-    end
-
-    -- Get the items, operations tables, and operations data
-    local itemsTable = TradeSkillMasterDB["p@Default@userData@items"]
+-- Helper function to get TSM operations for a group
+function FLIPR:GetTSMGroupOperations(groupPath)
+    if not TradeSkillMasterDB then return {} end
     local operationsTable = TradeSkillMasterDB["p@Default@userData@groups"]
-    local operationsData = TradeSkillMasterDB["p@Default@userData@operations"]
-    if not itemsTable then
-        print("No TSM items/groups found")
-        return
+    if not operationsTable or not operationsTable[groupPath] then return {} end
+    
+    local ops = {}
+    for moduleName, moduleData in pairs(operationsTable[groupPath]) do
+        if type(moduleData) == "table" then
+            ops[moduleName] = {
+                override = moduleData.override,
+                operations = moduleData
+            }
+        end
     end
+    return ops
+end
 
+-- Helper function to get operation details
+function FLIPR:GetTSMOperationDetails(moduleName, operationName)
+    if not TradeSkillMasterDB then return nil end
+    local operationsData = TradeSkillMasterDB["p@Default@userData@operations"]
+    if not operationsData or not operationsData[moduleName] or not operationsData[moduleName][operationName] then
+        return nil
+    end
+    return operationsData[moduleName][operationName]
+end
+
+-- Get all TSM shopping operations for an item
+function FLIPR:GetTSMShoppingOperations(itemID)
+    local groupPath = self:GetTSMGroupPath(itemID)
+    if not groupPath then return nil end
+    
+    local groupOps = self:GetTSMGroupOperations(groupPath)
+    if not groupOps or not groupOps.Shopping then return nil end
+    
+    local operations = {}
+    for _, opName in ipairs(groupOps.Shopping.operations) do
+        local details = self:GetTSMOperationDetails("Shopping", opName)
+        if details then
+            table.insert(operations, {
+                name = opName,
+                maxPrice = details.maxPrice,
+                restockQuantity = details.restockQuantity
+            })
+        end
+    end
+    
+    return operations
+end
+
+-- Get all unique TSM groups
+function FLIPR:GetTSMGroups()
+    if not TradeSkillMasterDB then return {} end
+    
+    local itemsTable = TradeSkillMasterDB["p@Default@userData@items"]
+    if not itemsTable then return {} end
+    
     -- Build a table of unique groups
     local groups = {}
     for _, groupPath in pairs(itemsTable) do
@@ -106,390 +95,49 @@ function FLIPR:GetTSMGroups()
             groups[currentPath] = true
         end
     end
-
-    -- Function to get operation details
-    local function getOperationDetails(moduleName, operationName)
-        if not operationsData or not operationsData[moduleName] or not operationsData[moduleName][operationName] then
-            return nil
-        end
-        return operationsData[moduleName][operationName]
-    end
-
-    -- Function to get operations for a group
-    local function getGroupOperations(groupPath)
-        if not operationsTable or not operationsTable[groupPath] then
-            return {}
-        end
-        
-        local ops = {}
-        for moduleName, moduleData in pairs(operationsTable[groupPath]) do
-            if type(moduleData) == "table" then
-                ops[moduleName] = {
-                    override = moduleData.override,
-                    operations = {}
-                }
-                -- Add each operation with its details
-                for i, opName in ipairs(moduleData) do
-                    local details = getOperationDetails(moduleName, opName)
-                    ops[moduleName].operations[opName] = details
-                end
-            end
-        end
-        return ops
-    end
-
-    -- Function to print group hierarchy
-    local function printGroupHierarchy(basePath, level)
-        level = level or 0
-        local indent = string.rep("  ", level)
-        
-        if level == 0 then
-            print("Group:", basePath)
-            -- Print operations for root group
-            local ops = getGroupOperations(basePath)
-            for module, moduleData in pairs(ops) do
-                if moduleData.override then
-                    print(indent .. "  " .. module .. " Operations (Override):")
-                else
-                    print(indent .. "  " .. module .. " Operations:")
-                end
-                for opName, opDetails in pairs(moduleData.operations) do
-                    print(indent .. "    - " .. opName)
-                    if opDetails then
-                        -- Print key operation settings
-                        if opDetails.maxPrice then
-                            print(indent .. "      maxPrice: " .. opDetails.maxPrice)
-                        end
-                        if opDetails.minPrice then
-                            print(indent .. "      minPrice: " .. opDetails.minPrice)
-                        end
-                        if opDetails.restockQuantity then
-                            print(indent .. "      restockQuantity: " .. opDetails.restockQuantity)
-                        end
-                    end
-                end
-            end
-        end
-        
-        -- Find all direct children of this path
-        local children = {}
-        for path in pairs(groups) do
-            -- Check if this is a direct child (one level deeper)
-            local parent = basePath == "" and "^[^`]+" or "^" .. basePath .. "`[^`]+"
-            if path:match(parent) then
-                local childName = path:match(basePath == "" and "^([^`]+)" or basePath .. "`([^`]+)")
-                if childName then
-                    children[childName] = path
-                end
-            end
-        end
-        
-        -- Sort and print children
-        local sortedChildren = {}
-        for childName in pairs(children) do
-            table.insert(sortedChildren, childName)
-        end
-        table.sort(sortedChildren)
-        
-        for _, childName in ipairs(sortedChildren) do
-            local fullPath = children[childName]
-            print(indent .. "- Child:", childName)
-            -- Print operations for this child
-            local ops = getGroupOperations(fullPath)
-            for module, moduleData in pairs(ops) do
-                if moduleData.override then
-                    print(indent .. "    " .. module .. " Operations (Override):")
-                else
-                    print(indent .. "    " .. module .. " Operations:")
-                end
-                for opName, opDetails in pairs(moduleData.operations) do
-                    print(indent .. "      - " .. opName)
-                    if opDetails then
-                        -- Print key operation settings
-                        if opDetails.maxPrice then
-                            print(indent .. "        maxPrice: " .. opDetails.maxPrice)
-                        end
-                        if opDetails.minPrice then
-                            print(indent .. "        minPrice: " .. opDetails.minPrice)
-                        end
-                        if opDetails.restockQuantity then
-                            print(indent .. "        restockQuantity: " .. opDetails.restockQuantity)
-                        end
-                    end
-                end
-            end
-            -- Recursively print this child's children
-            printGroupHierarchy(fullPath, level + 1)
-        end
-    end
-
-    -- Print the groups in a tree structure
-    print("Found groups in TSM:")
-    -- First find all root groups
-    local rootGroups = {}
-    for path in pairs(groups) do
-        if not string.find(path, "`") then
-            table.insert(rootGroups, path)
-        end
-    end
     
-    -- Sort and print root groups
-    table.sort(rootGroups)
-    for _, rootGroup in ipairs(rootGroups) do
-        printGroupHierarchy(rootGroup)
-    end
-
-    print("=== GetAvailableGroups END ===")
+    return groups
 end
 
-function FLIPR:GetTSMShoppingOperations(itemID)
-    -- Get the item's group path from TSM
+-- Get all items in a TSM group
+function FLIPR:GetTSMGroupItems(groupPath)
+    if not TradeSkillMasterDB then return {} end
+    
     local itemsTable = TradeSkillMasterDB["p@Default@userData@items"]
-    if not itemsTable then 
-        print("No TSM items table found")
-        return 
-    end
+    if not itemsTable then return {} end
     
-    local groupPath = itemsTable["i:" .. itemID]
-    if not groupPath then 
-        print("Item " .. itemID .. " not found in any TSM group")
-        return 
-    end
-    
-    -- Get the operations for this group
-    local groupOps = TradeSkillMasterDB["p@Default@userData@groups"][groupPath]
-    if not groupOps or not groupOps.Shopping then
-        print("No shopping operations found for group: " .. groupPath)
-        return
-    end
-    
-    -- Get operation details
-    local operations = {}
-    for _, opName in ipairs(groupOps.Shopping) do
-        local opDetails = TradeSkillMasterDB["p@Default@userData@operations"].Shopping[opName]
-        if opDetails then
-            -- Store all settings from the operation
-            operations[opName] = {}
-            for key, value in pairs(opDetails) do
-                operations[opName][key] = value
+    local items = {}
+    for itemString, path in pairs(itemsTable) do
+        if path == groupPath or path:match("^" .. groupPath .. "`") then
+            local itemID = itemString:match("i:(%d+)")
+            if itemID then
+                items[tonumber(itemID)] = true
             end
         end
     end
     
-    return operations, groupPath
+    return items
 end
 
-function FLIPR:TestTSMPriceEvaluation(itemID)
-    local testItems = {
-        14047,  -- Runecloth
-        2589,   -- Linen Cloth
-        4306,   -- Silk Cloth
-        2592,   -- Wool Cloth
-        4338,   -- Mageweave Cloth
-        2934,   -- Rugged Leather
-        2318,   -- Light Leather
-        4234    -- Heavy Leather
-    }
-    
-    if itemID then
-        testItems = {itemID}
-    end
-    
-    for _, id in ipairs(testItems) do
-        print("\n=== Testing TSM Price Evaluation for Item:", id, "===")
-        
-        local operations, groupPath = self:GetTSMShoppingOperations(id)
-        if operations then
-            print("Group Path:", groupPath)
-            for opName, opDetails in pairs(operations) do
-                print("\nOperation:", opName)
-                
-                -- Print all operation settings
-                for key, value in pairs(opDetails) do
-                    if type(value) == "table" then
-                        print("  " .. key .. ":")
-                        for subKey, subValue in pairs(value) do
-                            print("    " .. subKey .. ":", subValue)
-                        end
-                    else
-                        print("  " .. key .. ":", value)
-                    end
-                end
-                
-                -- Try to evaluate maxPrice and restockQuantity if they exist
-                if opDetails.maxPrice then
-                    local maxPrice = TSM_API.GetCustomPriceValue(opDetails.maxPrice, "i:" .. id)
-                    print("\n  Price String:", opDetails.maxPrice)
-                    print("  Evaluated maxPrice:", maxPrice and GetCoinTextureString(maxPrice) or "N/A")
-                    
-                    -- Debug all price sources used in the string
-                    print("\n  Individual Price Sources:")
-                    local sources = {
-                        maxstack = TSM_API.GetCustomPriceValue("maxstack", "i:" .. id),
-                        dbmarket = TSM_API.GetCustomPriceValue("DBMarket", "i:" .. id),
-                        dbregionmarketavg = TSM_API.GetCustomPriceValue("DBRegionMarketAvg", "i:" .. id),
-                        dbminbuyout = TSM_API.GetCustomPriceValue("DBMinBuyout", "i:" .. id),
-                        vendorbuy = TSM_API.GetCustomPriceValue("VendorBuy", "i:" .. id),
-                        vendorsell = TSM_API.GetCustomPriceValue("VendorSell", "i:" .. id),
-                        crafting = TSM_API.GetCustomPriceValue("Crafting", "i:" .. id),
-                        dbregionhistorical = TSM_API.GetCustomPriceValue("DBRegionHistorical", "i:" .. id),
-                        dbregionsaleavg = TSM_API.GetCustomPriceValue("DBRegionSaleAvg", "i:" .. id),
-                        salerate = TSM_API.GetCustomPriceValue("SaleRate*1000", "i:" .. id),
-                        dbregionsalerate = TSM_API.GetCustomPriceValue("DBRegionSaleRate*1000", "i:" .. id)
-                    }
-                    
-                    for name, value in pairs(sources) do
-                        if value then
-                            if name:match("rate") then
-                                print(string.format("    %s: %.3f", name, value/1000))
-                            else
-                                print("    " .. name .. ":", GetCoinTextureString(value))
-                            end
-                        else
-                            print("    " .. name .. ": nil")
-                        end
-                    end
-
-                    -- Debug intermediate calculations
-                    print("\n  Intermediate Calculations:")
-                    local itemString = "i:" .. id
-                    local tests = {
-                        ["max(dbregionsalerate,0.001)"] = TSM_API.GetCustomPriceValue("max(dbregionsalerate,0.001)", itemString),
-                        ["min(150%dbregionhistorical,dbregionmarketavg,250%dbregionsaleavg)"] = TSM_API.GetCustomPriceValue("min(150%dbregionhistorical,dbregionmarketavg,250%dbregionsaleavg)", itemString),
-                        ["min(1/salerate,1/dbregionsalerate,1000)"] = TSM_API.GetCustomPriceValue("min(1/salerate,1/dbregionsalerate,1000)", itemString),
-                        ["75%min(150%dbregionhistorical,dbregionmarketavg,250%dbregionsaleavg)"] = TSM_API.GetCustomPriceValue("75%min(150%dbregionhistorical,dbregionmarketavg,250%dbregionsaleavg)", itemString),
-                        ["60%vendorsell"] = TSM_API.GetCustomPriceValue("60%vendorsell", itemString),
-                        ["1s/maxstack"] = TSM_API.GetCustomPriceValue("1s/maxstack", itemString),
-                        ["max(1s/maxstack,60%vendorsell)"] = TSM_API.GetCustomPriceValue("max(1s/maxstack,60%vendorsell)", itemString),
-                        -- Add the full right side of the comparison
-                        ["75%min(150%dbregionhistorical,dbregionmarketavg,250%dbregionsaleavg)-min(1/salerate,1/dbregionsalerate,1000)*max(1s/maxstack,60%vendorsell)/0.95"] = TSM_API.GetCustomPriceValue("75%min(150%dbregionhistorical,dbregionmarketavg,250%dbregionsaleavg)-min(1/salerate,1/dbregionsalerate,1000)*max(1s/maxstack,60%vendorsell)/0.95", itemString),
-                        -- Add the full iflte comparison
-                        ["iflte(dbminbuyout,75%min(150%dbregionhistorical,dbregionmarketavg,250%dbregionsaleavg)-min(1/salerate,1/dbregionsalerate,1000)*max(1s/maxstack,60%vendorsell)/0.95)"] = TSM_API.GetCustomPriceValue("iflte(dbminbuyout,75%min(150%dbregionhistorical,dbregionmarketavg,250%dbregionsaleavg)-min(1/salerate,1/dbregionsalerate,1000)*max(1s/maxstack,60%vendorsell)/0.95)", itemString),
-                        -- Add the comparison values separately
-                        ["dbminbuyout"] = TSM_API.GetCustomPriceValue("dbminbuyout", itemString),
-                        ["rightside"] = TSM_API.GetCustomPriceValue("75%min(150%dbregionhistorical,dbregionmarketavg,250%dbregionsaleavg)-min(1/salerate,1/dbregionsalerate,1000)*max(1s/maxstack,60%vendorsell)/0.95", itemString)
-                    }
-                    
-                    -- Print comparison values first
-                    if tests["dbminbuyout"] and tests["rightside"] then
-                        print("\n  Comparison:")
-                        print(string.format("    dbminbuyout: %s", GetCoinTextureString(tests["dbminbuyout"])))
-                        print(string.format("    target price: %s", GetCoinTextureString(tests["rightside"])))
-                        print(string.format("    result: %s", tests["dbminbuyout"] <= tests["rightside"] and "true" or "false"))
-                        
-                        -- Add checks for outer conditions
-                        print("\n  Outer Conditions:")
-                        local maxstack = TSM_API.GetCustomPriceValue("maxstack", itemString)
-                        local salerate = TSM_API.GetCustomPriceValue("DBRegionSaleRate*1000", itemString)
-                        if salerate then salerate = salerate / 1000 end
-                        
-                        if maxstack then
-                            print(string.format("    maxstack > 1: %s", maxstack > 1 and "true" or "false"))
-                        else
-                            print("    maxstack > 1: nil (maxstack is nil)")
-                        end
-                        
-                        if salerate then
-                            print(string.format("    max(dbregionsalerate,0.001) >= 0.1: %s", math.max(salerate, 0.001) >= 0.1 and "true" or "false"))
-                        else
-                            print("    max(dbregionsalerate,0.001) >= 0.1: nil (salerate is nil)")
-                        end
-                    end
-                    
-                    print("\n  All Calculations:")
-                    
-                    for expr, value in pairs(tests) do
-                        if value then
-                            if expr:match("rate") then
-                                print(string.format("    %s = %.3f", expr, value))
-                            else
-                                print("    " .. expr .. " = " .. GetCoinTextureString(value))
-                            end
-                        else
-                            print("    " .. expr .. " = nil")
-                        end
-                    end
-                end
-                
-                if opDetails.restockQuantity then
-                    local restockQty = TSM_API.GetCustomPriceValue(opDetails.restockQuantity, "i:" .. id)
-                    print("\n  Quantity String:", opDetails.restockQuantity)
-                    print("  Evaluated restockQuantity:", restockQty or "N/A")
-                    print("  DBRegionSoldPerDay:", TSM_API.GetCustomPriceValue("DBRegionSoldPerDay", "i:" .. id) or "N/A")
-                end
-            end
-        else
-            print("No operations found for item", id)
-        end
-    end
-    
-    print("\n=== Test Complete ===")
-end
-
--- Register our event handler
-FLIPR:RegisterEvent("PLAYER_LOGIN", function()
-    -- Test the price evaluation with all items
-    FLIPR:TestTSMPriceEvaluation()
-end)
-
+-- Initialize addon
 function FLIPR:OnInitialize()
-    -- Initialize groups database
-    FliprDB = FliprDB or {
-        groups = {},
-        version = 1,
-        -- UI settings
-        showConfirm = true,
-        enabledGroups = {},      
-        expandedGroups = {}      
-    }
+    -- Initialize saved variables
+    self.db = LibStub("AceDB-3.0"):New("FliprDB", {
+        profile = defaultSettings
+    })
     
-    -- Initialize profitability settings separately
-    FliprSettings = FliprSettings or {
-        version = 1,
-        -- Inventory control settings
-        highSaleRate = 0.4,      
-        mediumSaleRate = 0.2,    
-        highInventory = 100,     
-        mediumInventory = 10,    
-        lowInventory = 5,
-        -- Profitability settings
-        minProfit = 1000,         -- 10 silver minimum profit
-        highVolumeROI = 15,       -- 15% for fast movers
-        mediumVolumeROI = 25,     -- 25% for regular items
-        lowVolumeROI = 40,        -- 40% for slow movers
-        veryLowVolumeROI = 70,    -- 70% for very slow movers
-        unstableMarketMultiplier = 1.3,  -- 30% more profit needed in unstable markets
-        historicalLowMultiplier = 0.8,   -- 20% less ROI needed if prices are historically low
-    }
-    
-    -- Set references
-    self.db = FliprSettings      -- For profitability settings
-    self.groupDB = FliprDB       -- For groups data and UI settings
-    
-    -- Initialize database
-    self:InitializeDB()
-    
-    -- Initialize available groups
-    self.availableGroups = self:GetAvailableGroups()
-    
-    -- Check TSM groups
-    self:GetTSMGroups()
-    
-    -- Create options panel (moved to after database initialization)
-    self:CreateOptionsPanel()
-    
-    -- Register slash commands
-    self:RegisterChatCommand("flipr", "HandleSlashCommand")
-    
-    print("FLIPR Settings and Database loaded")
+    -- Initialize settings
+    self.settings = LibStub("AceDB-3.0"):New("FliprSettings", {
+        profile = {}
+    })
 end
 
 function FLIPR:OnEnable()
-    -- Initialize UI events
+    -- Register AH events
     self:RegisterEvent("AUCTION_HOUSE_SHOW", "OnAuctionHouseShow")
     self:RegisterEvent("AUCTION_HOUSE_CLOSED", "OnAuctionHouseClosed")
     
-    -- Initialize scanner
+    -- Initialize scanner state
     self.selectedRow = nil
     self.selectedItem = nil
     self.isScanning = false
@@ -502,78 +150,4 @@ function FLIPR:OnEnable()
     -- Initialize scan timer
     self.scanTimer = 0
     self.scanStartTime = 0
-    
-    -- Debug print
-    print("FLIPR enabled - All systems initialized")
-end
-
-function FLIPR:HandleSlashCommand(input)
-    -- Split input into command and value
-    local command, value = strsplit(" ", input)
-    
-    if not command or command == "" then
-        -- Open options panel if no command
-        Settings.OpenToCategory("FLIPR")
-        return
-    end
-    
-    -- Convert value to number if provided
-    local numValue = tonumber(value)
-    
-    -- Handle different commands
-    if command == "hsr" or command == "highsale" then
-        if not numValue then
-            self:Print("Usage: /flipr hsr <value> (0-1)")
-            return
-        end
-        numValue = math.min(math.max(math.floor(numValue * 1000) / 1000, 0), 1)
-        self.db.highSaleRate = numValue
-        self:Print("High sale rate set to:", numValue)
-        
-    elseif command == "msr" or command == "medsale" then
-        if not numValue then
-            self:Print("Usage: /flipr msr <value> (0-1)")
-            return
-        end
-        numValue = math.min(math.max(math.floor(numValue * 1000) / 1000, 0), 1)
-        self.db.mediumSaleRate = numValue
-        self:Print("Medium sale rate set to:", numValue)
-        
-    elseif command == "hi" or command == "highinv" then
-        if not numValue then
-            self:Print("Usage: /flipr hi <value> (1-200)")
-            return
-        end
-        numValue = math.min(math.max(math.floor(numValue), 1), 200)
-        self.db.highInventory = numValue
-        self:Print("High inventory limit set to:", numValue)
-        
-    elseif command == "mi" or command == "medinv" then
-        if not numValue then
-            self:Print("Usage: /flipr mi <value> (1-50)")
-            return
-        end
-        numValue = math.min(math.max(math.floor(numValue), 1), 50)
-        self.db.mediumInventory = numValue
-        self:Print("Medium inventory limit set to:", numValue)
-        
-    elseif command == "li" or command == "lowinv" then
-        if not numValue then
-            self:Print("Usage: /flipr li <value> (1-20)")
-            return
-        end
-        numValue = math.min(math.max(math.floor(numValue), 1), 20)
-        self.db.lowInventory = numValue
-        self:Print("Low inventory limit set to:", numValue)
-        
-    else
-        -- Print usage
-        self:Print("FLIPR Commands:")
-        self:Print("  /flipr - Open settings")
-        self:Print("  /flipr hsr <0-1> - Set high sale rate")
-        self:Print("  /flipr msr <0-1> - Set medium sale rate")
-        self:Print("  /flipr hi <1-200> - Set high inventory limit")
-        self:Print("  /flipr mi <1-50> - Set medium inventory limit")
-        self:Print("  /flipr li <1-20> - Set low inventory limit")
-    end
 end 
