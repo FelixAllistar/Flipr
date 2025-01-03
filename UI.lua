@@ -281,9 +281,9 @@ function FLIPR:GetTSMGroups()
         end
     end
     
-    return groups
-end
-
+        return groups
+    end
+    
 function FLIPR:GetTSMGroupItems(groupPath)
     if not TradeSkillMasterDB then return {} end
     
@@ -327,9 +327,9 @@ function FLIPR:RefreshGroupList()
             if checkPath:match("^" .. path .. "`") then
                 hasChildren = true
                 break
-            end
         end
-        
+    end
+    
         -- Create expand button only if the group has children
         local expandButton = CreateFrame("Button", nil, container)
         expandButton:SetSize(16, 16)
@@ -405,7 +405,7 @@ function FLIPR:RefreshGroupList()
         if not node then return end
         
         -- Sort groups alphabetically
-        local sortedGroups = {}
+    local sortedGroups = {}
         for name, data in pairs(node) do
             table.insert(sortedGroups, {name = name, data = data})
         end

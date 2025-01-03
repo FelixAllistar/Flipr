@@ -231,6 +231,23 @@ function FLIPR:OnThrottleResponse()
     end)
 end
 
+-- Helper function to create a basic search query
+function FLIPR:CreateSearchQuery()
+    return {
+        searchString = "",
+        minLevel = 0,
+        maxLevel = 0,
+        filters = {},
+        itemClassFilters = {},
+        sorts = {},
+        separateOwnerItems = false,
+        exactMatch = false,
+        isFavorite = false,
+        allowFavorites = true,
+        onlyUsable = false
+    }
+end
+
 function FLIPR:ScanNextItem()
     -- Check if scan was cancelled or paused
     if not self.isScanning or self.isPaused then
@@ -274,10 +291,7 @@ function FLIPR:ScanNextItem()
         end
         
         -- Update progress text
-        if self.scanProgressText then
-            self.scanProgressText:SetText(string.format("%d/%d items", 
-                self.currentScanIndex, #self.itemIDs))
-        end
+        self:UpdateScanProgress()
         
         -- Print scanning message
         print(string.format("|cFFFFFFFFScanning item %d/%d: %s (%d)|r", 
@@ -287,76 +301,31 @@ function FLIPR:ScanNextItem()
         local itemKey = C_AuctionHouse.MakeItemKey(itemID)
         if not itemKey then
             print(string.format("|cFFFF0000Failed to create item key for item ID: %d|r", itemID))
-            -- Add to failed items and retry later
-            if not self.failedItems[itemID] then
-                self.failedItems[itemID] = 0
-            end
-            self.failedItems[itemID] = self.failedItems[itemID] + 1
-            
-            if self.failedItems[itemID] <= self.maxRetries then
-                print(string.format("Retry %d/%d for item %d", self.failedItems[itemID], self.maxRetries, itemID))
-                C_Timer.After(2, function() self:ScanNextItem() end)
-            else
-                print(string.format("|cFFFF0000Max retries reached for item %d, skipping|r", itemID))
-                self.currentScanIndex = self.currentScanIndex + 1
-                C_Timer.After(0.5, function() self:ScanNextItem() end)
-            end
+            self.currentScanIndex = self.currentScanIndex + 1
+            self:UpdateScanProgress()
+            self:ScanNextItem()
             return
         end
 
         local itemInfo = C_AuctionHouse.GetItemKeyInfo(itemKey)
         if not itemInfo then
             print(string.format("|cFFFF0000Failed to get item info for item ID: %d|r", itemID))
-            -- Add to failed items and retry later
-            if not self.failedItems[itemID] then
-                self.failedItems[itemID] = 0
-            end
-            self.failedItems[itemID] = self.failedItems[itemID] + 1
-            
-            if self.failedItems[itemID] <= self.maxRetries then
-                print(string.format("Retry %d/%d for item %d", self.failedItems[itemID], self.maxRetries, itemID))
-                C_Timer.After(2, function() self:ScanNextItem() end)
-            else
-                print(string.format("|cFFFF0000Max retries reached for item %d, skipping|r", itemID))
-                self.currentScanIndex = self.currentScanIndex + 1
-                C_Timer.After(0.5, function() self:ScanNextItem() end)
-            end
+            self.currentScanIndex = self.currentScanIndex + 1
+            self:UpdateScanProgress()
+            self:ScanNextItem()
             return
         end
         
-        -- Debug print commodity status
+        -- Create basic query
+        local query = self:CreateSearchQuery()
+        
+        -- Send appropriate search query
         if itemInfo.isCommodity then
             print(string.format("|cFF00FFFFItem is a commodity: %s|r", itemName))
-            -- For commodities, use specific commodity search
-            C_AuctionHouse.SendSearchQuery(itemKey, {
-                searchString = "",
-                minLevel = 0,
-                maxLevel = 0,
-                filters = {},
-                itemClassFilters = {},
-                sorts = {},
-                separateOwnerItems = false,
-                exactMatch = false,
-                isFavorite = false,
-                allowFavorites = true,
-                onlyUsable = false
-            }, true)
+            C_AuctionHouse.SendSearchQuery(itemKey, query, true, itemID)
         else
             print(string.format("|cFFFF00FFItem is NOT a commodity: %s|r", itemName))
-            -- For regular items, use item search
-            C_AuctionHouse.SendSearchQuery(itemKey, {
-                searchString = "",
-                minLevel = 0,
-                maxLevel = 0,
-                filters = {},
-                itemClassFilters = {},
-                sorts = {},
-                separateOwnerItems = false,
-                exactMatch = false,
-                isFavorite = false,
-                allowFavorites = true,
-                onlyUsable = false
-            }, true)
+            C_AuctionHouse.SendSearchQuery(itemKey, query, true)
         end
     else
         -- Scan complete
@@ -379,6 +348,13 @@ function FLIPR:ScanNextItem()
             self:UnregisterEvent("ITEM_SEARCH_RESULTS_UPDATED")
             self.isEventRegistered = false
         end
+    end
+end
+
+function FLIPR:UpdateScanProgress()
+    if self.scanProgressText then
+        self.scanProgressText:SetText(string.format("%d/%d items", 
+            self.currentScanIndex, #self.itemIDs))
     end
 end
 
@@ -405,80 +381,29 @@ function FLIPR:OnCommoditySearchResults()
         return
     end
     
-    -- First check if we have any results at all
-    local numResults = C_AuctionHouse.GetNumCommoditySearchResults(itemID)
-    if not numResults or numResults == 0 then
-        -- For commodities, do an extra thorough check
-        if not self.commodityRetries then
-            self.commodityRetries = {}
-        end
-        
-        if not self.commodityRetries[itemID] then
-            self.commodityRetries[itemID] = 0
-        end
-        
-        self.commodityRetries[itemID] = self.commodityRetries[itemID] + 1
-        
-        if self.commodityRetries[itemID] <= 3 then  -- Try up to 3 times
-            print(string.format("Commodity retry %d/3 for %s", self.commodityRetries[itemID], GetItemInfo(itemID) or itemID))
-            -- Wait longer for commodities
-            C_Timer.After(3, function()
-                -- Resend the search query
-                local itemKey = C_AuctionHouse.MakeItemKey(itemID)
-                C_AuctionHouse.SendSearchQuery(itemKey, {
-                    searchString = "",
-                    minLevel = 0,
-                    maxLevel = 0,
-                    filters = {},
-                    itemClassFilters = {},
-                    sorts = {},
-                    separateOwnerItems = false,
-                    exactMatch = false,
-                    isFavorite = false,
-                    allowFavorites = true,
-                    onlyUsable = false
-                }, true)
-            end)
-            return
-        end
-        
-        -- If we've tried enough times and still no results
-        print(string.format("|cFFFF8000NO AUCTIONS FOUND: %s|r", GetItemInfo(itemID) or itemID))
-        self.currentScanIndex = self.currentScanIndex + 1
-        -- Clear retry counter for this item
-        self.commodityRetries[itemID] = nil
-        C_Timer.After(0.5, function() self:ScanNextItem() end)
-        return
-    end
-
     -- Process results only if we have full data
-    local itemInfo = C_AuctionHouse.GetItemKeyInfo(C_AuctionHouse.MakeItemKey(itemID))
-    if not itemInfo then 
-        self.currentScanIndex = self.currentScanIndex + 1
-        C_Timer.After(0.5, function() self:ScanNextItem() end)
-        return 
-    end
-    
+    local numResults = C_AuctionHouse.GetNumCommoditySearchResults(itemID)
     local processedResults = {}
-    for i = 1, numResults do
-        local result = C_AuctionHouse.GetCommoditySearchResultInfo(itemID, i)
-        if result then
-            table.insert(processedResults, {
-                itemName = GetItemInfo(itemID),
-                minPrice = result.unitPrice,
-                totalQuantity = result.quantity,
-                itemID = itemID,
-                isCommodity = true
-            })
+    
+    if numResults and numResults > 0 then
+        for i = 1, numResults do
+            local result = C_AuctionHouse.GetCommoditySearchResultInfo(itemID, i)
+            if result then
+                table.insert(processedResults, {
+                    itemName = GetItemInfo(itemID),
+                    minPrice = result.unitPrice,
+                    totalQuantity = result.quantity,
+                    itemID = itemID,
+                    isCommodity = true
+                })
+            end
         end
     end
     
     if #processedResults > 0 then
-        -- Clear retry counter on success
-        if self.commodityRetries then
-            self.commodityRetries[itemID] = nil
-        end
         self:ProcessAuctionResults(processedResults)
+    else
+        print(string.format("|cFFFF8000NO AUCTIONS FOUND: %s|r", GetItemInfo(itemID) or itemID))
     end
     
     -- Check if we should pause after this item
@@ -494,7 +419,8 @@ function FLIPR:OnCommoditySearchResults()
     
     -- Move to next item if not pausing
     self.currentScanIndex = self.currentScanIndex + 1
-    C_Timer.After(0.5, function() self:ScanNextItem() end)
+    self:UpdateScanProgress()
+    self:ScanNextItem()
 end
 
 function FLIPR:OnItemSearchResults()
@@ -508,37 +434,28 @@ function FLIPR:OnItemSearchResults()
     
     local itemKey = C_AuctionHouse.MakeItemKey(itemID)
     local numResults = C_AuctionHouse.GetNumItemSearchResults(itemKey)
-    
-    if not numResults or numResults == 0 then
-        -- Double check before giving up
-        local checkResult = self:DoubleCheckAuctions(itemID, itemKey)
-        if checkResult == "waiting" then
-            return -- Will retry from DoubleCheckAuctions
-        elseif not checkResult then
-            print(string.format("|cFFFF8000NO AUCTIONS FOUND: %s|r", GetItemInfo(itemID) or itemID))
-            self.currentScanIndex = self.currentScanIndex + 1
-            C_Timer.After(0.5, function() self:ScanNextItem() end)
-            return
-        end
-    end
-
     local processedResults = {}
-    for i = 1, numResults do
-        local result = C_AuctionHouse.GetItemSearchResultInfo(itemKey, i)
-        if result then
-            table.insert(processedResults, {
-                itemName = GetItemInfo(itemID),
-                minPrice = result.buyoutAmount or result.bidAmount,
-                totalQuantity = 1,
-                itemID = itemID,
-                auctionID = result.auctionID,
-                isCommodity = false
-            })
+    
+    if numResults and numResults > 0 then
+        for i = 1, numResults do
+            local result = C_AuctionHouse.GetItemSearchResultInfo(itemKey, i)
+            if result then
+                table.insert(processedResults, {
+                    itemName = GetItemInfo(itemID),
+                    minPrice = result.buyoutAmount or result.bidAmount,
+                    totalQuantity = 1,
+                    itemID = itemID,
+                    auctionID = result.auctionID,
+                    isCommodity = false
+                })
+            end
         end
     end
     
     if #processedResults > 0 then
         self:ProcessAuctionResults(processedResults)
+    else
+        print(string.format("|cFFFF8000NO AUCTIONS FOUND: %s|r", GetItemInfo(itemID) or itemID))
     end
     
     -- Check if we should pause after this item
@@ -554,7 +471,8 @@ function FLIPR:OnItemSearchResults()
     
     -- Move to next item if not pausing
     self.currentScanIndex = self.currentScanIndex + 1
-    C_Timer.After(0.5, function() self:ScanNextItem() end)
+    self:UpdateScanProgress()
+    self:ScanNextItem()
 end
 
 function FLIPR:ProcessAuctionResults(results)
