@@ -223,9 +223,14 @@ end
 
 function FLIPR:OnThrottleResponse()
     self.isThrottled = false
+    if self.throttleTimer then
+        self.throttleTimer:Cancel()
+        self.throttleTimer = nil
+    end
     -- Add a small delay after throttle response before continuing
     C_Timer.After(0.5, function()
         if self.isScanning and not self.isPaused then
+            -- Don't increment currentScanIndex, retry the same item
             self:ScanNextItem()
         end
     end)
@@ -268,9 +273,24 @@ function FLIPR:ScanNextItem()
     if not C_AuctionHouse.IsThrottledMessageSystemReady() then
         if not self.isThrottled then
             self.isThrottled = true
-            print("|cFFFFFF00Throttled, waiting for system ready event...|r")
+            print(string.format("|cFFFFFF00Throttled on item %d/%d, waiting...|r", 
+                self.currentScanIndex, #self.itemIDs))
+            
+            -- Add safety timeout in case we miss the throttle response event
+            if self.throttleTimer then
+                self.throttleTimer:Cancel()
+            end
+            self.throttleTimer = C_Timer.NewTimer(5, function()
+                print("|cFFFFFF00Throttle timeout reached, retrying item...|r")
+                self.isThrottled = false
+                self.throttleTimer = nil
+                if self.isScanning and not self.isPaused then
+                    -- Don't increment currentScanIndex, retry the same item
+                    self:ScanNextItem()
+                end
+            end)
         end
-        return -- Don't continue until we get the throttle response event
+        return -- Don't continue until we get the throttle response event or timeout
     end
 
     -- Continue with normal scanning
@@ -501,11 +521,11 @@ function FLIPR:ProcessAuctionResults(results)
         print(string.format(
             "|cFF00FF00Found flip for %s: Buy @ %s (x%d), Sell @ %s, Profit: %s, ROI: %d%%, Sale Rate: %s|r",
             itemName,
-            GetCoinTextureString(flipOpportunity.avgBuyPrice),
-            flipOpportunity.buyQuantity,
-            GetCoinTextureString(flipOpportunity.sellPrice),
-            GetCoinTextureString(flipOpportunity.totalProfit),
-            flipOpportunity.roi,
+            GetCoinTextureString(tonumber(flipOpportunity.avgBuyPrice) or 0),
+            flipOpportunity.buyQuantity or 0,
+            GetCoinTextureString(tonumber(flipOpportunity.sellPrice) or 0),
+            GetCoinTextureString(tonumber(flipOpportunity.totalProfit) or 0),
+            tonumber(flipOpportunity.roi) or 0,
             tostring(saleRate)
         ))
         

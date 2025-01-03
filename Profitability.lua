@@ -85,11 +85,17 @@ function FLIPR:AnalyzeMarketConditions(itemID)
     
     -- Get TSM shopping operations for this item
     local operations = self:GetTSMShoppingOperations(itemID)
-    if not operations or #operations == 0 then return nil end
+    if not operations or #operations == 0 then 
+        print(string.format("|cFFFFFF00No TSM shopping operations found for %s|r", GetItemInfo(itemID) or itemID))
+        return nil 
+    end
     
     -- Use the first operation's maxPrice
     local maxPrice = operations[1].maxPrice
-    if not maxPrice then return nil end
+    if not maxPrice then 
+        print(string.format("|cFFFFFF00TSM operation has no maxPrice defined for %s|r", GetItemInfo(itemID) or itemID))
+        return nil 
+    end
     
     -- Get price sources (with proper decimal handling)
     local regionMarket = self:GetTSMValue("DBRegionMarketAvg*1000", itemString, true)
@@ -100,10 +106,18 @@ function FLIPR:AnalyzeMarketConditions(itemID)
     
     -- Get the evaluated maxPrice from TSM
     local evaluatedMaxPrice = TSM_API.GetCustomPriceValue(maxPrice, itemString)
-    print(string.format("DEBUG: MaxPrice for %s: %s", GetItemInfo(itemID) or itemID, GetCoinTextureString(evaluatedMaxPrice or 0)))
+    print(string.format("DEBUG: MaxPrice formula for %s: %s", GetItemInfo(itemID) or itemID, maxPrice))
+    print(string.format("DEBUG: Evaluated MaxPrice for %s: %s", GetItemInfo(itemID) or itemID, GetCoinTextureString(evaluatedMaxPrice or 0)))
     
-    -- If evaluation fails, use 0 instead of nil
-    evaluatedMaxPrice = evaluatedMaxPrice or 0
+    -- If evaluation fails or returns 0, skip this item
+    if not evaluatedMaxPrice or evaluatedMaxPrice == 0 then
+        print(string.format("|cFFFFFF00MaxPrice evaluated to %s for %s (formula: %s)|r", 
+            evaluatedMaxPrice and "0" or "nil",
+            GetItemInfo(itemID) or itemID,
+            maxPrice
+        ))
+        return nil
+    end
     
     -- Market stability check
     local marketStability = localMarket / regionMarket
@@ -212,7 +226,7 @@ function FLIPR:AnalyzeFlipOpportunity(results, itemID)
     -- Get market conditions (includes TSM maxPrice)
     local marketData = self:AnalyzeMarketConditions(itemID)
     if not marketData then 
-        print(string.format("|cFFFFFF00No TSM shopping operation found for %s|r", itemName))
+        -- Don't print here since AnalyzeMarketConditions already printed a specific error
         return nil 
     end
     
@@ -237,17 +251,6 @@ function FLIPR:AnalyzeFlipOpportunity(results, itemID)
         return nil
     end
     
-    -- Check if the minimum purchase quantity is too high
-    if results[1].totalQuantity > roomForMore then
-        print(string.format(
-            "|cFFFF0000Skipping %s - First auction quantity (%d) exceeds our limit (%d)|r",
-            itemName,
-            results[1].totalQuantity,
-            roomForMore
-        ))
-        return nil
-    end
-    
     -- Determine if item is a commodity
     local itemKey = C_AuctionHouse.MakeItemKey(itemID)
     local itemInfo = C_AuctionHouse.GetItemKeyInfo(itemKey)
@@ -256,71 +259,106 @@ function FLIPR:AnalyzeFlipOpportunity(results, itemID)
     -- Find profitable auctions
     local profitableAuctions = {}
     local ahCut = 0.05  -- 5% AH fee
+    local minProfitInCopper = self.db.profile.minProfit * 10000  -- Convert gold to copper (1g = 10000c)
     
-    for i = 1, #results-1 do
-        local buyPrice = results[i].minPrice
-        local nextPrice = results[i+1].minPrice
-        local quantity = results[i].totalQuantity
+    -- Sort results by price
+    table.sort(results, function(a, b) return a.minPrice < b.minPrice end)
+    
+    -- Track cumulative quantities for profit calculation
+    local cumulativeQuantity = 0
+    local remainingNeeded = roomForMore  -- Track how many we still need to buy
+    local allAuctions = {}  -- Store all auctions for UI display
+    
+    for i = 1, #results do
+        local auction = results[i]
+        local buyPrice = auction.minPrice
         
-        -- Skip if buyPrice is above TSM's maxPrice
-        if buyPrice > marketData.maxPrice then
+        -- Always add to allAuctions for UI display
+        table.insert(allAuctions, {
+            buyPrice = buyPrice,
+            sellPrice = marketData.maxPrice,
+            quantity = auction.totalQuantity,
+            auctionIndex = i
+        })
+        
+        -- Only process for profitability if we still need more and price is good
+        if remainingNeeded > 0 and buyPrice <= marketData.maxPrice then
+            -- Calculate how many we can buy from this auction
+            local quantityFromThisAuction = math.min(auction.totalQuantity, remainingNeeded)
+            
+            -- Calculate deposit for posting duration (12 hours = 1)
+            local deposit = self:CalculateDeposit(itemID, 1, quantityFromThisAuction, isCommodity)
+            
+            -- Calculate potential profit including deposit cost
+            local sellPrice = marketData.maxPrice
+            local potentialProfit = math.floor((sellPrice * (1 - ahCut) - buyPrice) * quantityFromThisAuction - deposit)
+            local roi = math.floor(((sellPrice * (1 - ahCut) - buyPrice) / buyPrice) * 100)
+            
+            -- Check both ROI and minimum profit requirements
+            if potentialProfit >= minProfitInCopper and roi >= self.db.profile.highVolumeROI then
+                -- Check if this is a flash sale opportunity
+                local isFlash = self:IsFlashSale(buyPrice, marketData)
+                
+                -- Add to profitable auctions
+                table.insert(profitableAuctions, {
+                    buyPrice = buyPrice,
+                    sellPrice = sellPrice,
+                    quantity = quantityFromThisAuction,
+                    profit = potentialProfit,
+                    roi = roi,
+                    isFlashSale = isFlash,
+                    deposit = deposit,
+                    auctionIndex = i
+                })
+                
+                cumulativeQuantity = cumulativeQuantity + quantityFromThisAuction
+                remainingNeeded = remainingNeeded - quantityFromThisAuction
+                
+                -- For commodities, we can only buy the first auction
+                if isCommodity then break end
+            end
+        elseif remainingNeeded <= 0 then
+            print(string.format("|cFFFFFF00Already found enough quantity for %s - showing remaining auctions for info only|r", itemName))
+        elseif buyPrice > marketData.maxPrice then
             print(string.format(
-                "|cFFFFFF00Skipping %s - Price %s above maxPrice %s|r",
+                "|cFFFFFF00Skipping remaining auctions for %s - Price %s above maxPrice %s|r",
                 itemName,
                 GetCoinTextureString(buyPrice),
                 GetCoinTextureString(marketData.maxPrice)
             ))
-            break  -- No point checking further auctions as they'll be more expensive
-        end
-        
-        -- Calculate deposit for posting duration (12 hours = 1, 24 hours = 2, 48 hours = 3)
-        local deposit = self:CalculateDeposit(itemID, 1, quantity, isCommodity)
-        
-        -- Calculate potential profit including deposit cost
-        local potentialProfit = (nextPrice * (1 - ahCut)) - (buyPrice + deposit)
-        local roi = (potentialProfit / buyPrice) * 100
-        
-        -- Check both ROI and minimum profit requirements
-        local minProfitInCopper = self.db.profile.minProfit * 10000  -- Convert gold to copper (1g = 10000c)
-        
-        if potentialProfit >= minProfitInCopper and roi >= self.db.profile.highVolumeROI then
-            -- Check if this is a flash sale opportunity
-            local isFlash = self:IsFlashSale(buyPrice, marketData)
-            
-            -- Add to profitable auctions
-            table.insert(profitableAuctions, {
-                buyPrice = buyPrice,
-                sellPrice = nextPrice,
-                quantity = quantity,
-                profit = potentialProfit,
-                roi = roi,
-                isFlashSale = isFlash,
-                deposit = deposit,
-                auctionIndex = i
-            })
-            
-            -- For commodities, we can only buy the first auction
-            if isCommodity then break end
+            break  -- No point checking more auctions as they're sorted by price
         end
     end
     
-    -- If we found profitable auctions, return the best one
+    -- If we found profitable auctions, return all of them
     if #profitableAuctions > 0 then
         -- Sort by ROI
         table.sort(profitableAuctions, function(a, b) return a.roi > b.roi end)
         
-        local bestAuction = profitableAuctions[1]
+        -- Calculate aggregated values
+        local totalQuantity = 0
+        local totalCost = 0
+        local totalProfit = 0
+        
+        for _, auction in ipairs(profitableAuctions) do
+            totalQuantity = totalQuantity + auction.quantity
+            totalCost = totalCost + (auction.buyPrice * auction.quantity)
+            totalProfit = totalProfit + auction.profit
+        end
+        
+        local avgBuyPrice = math.floor(totalCost / totalQuantity)
+        
+        -- Return in format expected by UI
         return {
             itemID = itemID,
             itemName = itemName,
-            avgBuyPrice = bestAuction.buyPrice,
-            buyQuantity = bestAuction.quantity,
-            sellPrice = bestAuction.sellPrice,
-            totalProfit = bestAuction.profit,
-            roi = bestAuction.roi,
-            isFlashSale = bestAuction.isFlashSale,
-            deposit = bestAuction.deposit,
-            auctionIndex = bestAuction.auctionIndex,
+            avgBuyPrice = avgBuyPrice,
+            buyQuantity = totalQuantity,
+            sellPrice = marketData.maxPrice,
+            totalProfit = totalProfit,
+            roi = profitableAuctions[1].roi,  -- Use best ROI
+            auctions = allAuctions,  -- Show all auctions in UI
+            profitableAuctions = profitableAuctions,  -- But keep track of which ones are profitable
             isCommodity = isCommodity,
             marketData = marketData,
             currentInventory = currentInventory,
