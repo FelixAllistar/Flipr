@@ -22,7 +22,9 @@ Core.lua
 Parser.lua
 GroupTest.lua
 UI.lua
-Profitability.lua
+Profitability_Core.lua
+Profitability_TSM.lua
+Profitability_Classic.lua
 Scanner.lua
 Purchase.lua
 Options.lua

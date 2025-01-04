@@ -137,13 +137,39 @@ end
 
 -- Initialize addon
 function FLIPR:OnInitialize()
-    -- Initialize saved variables with AceDB
+    -- Initialize database
     self.db = LibStub("AceDB-3.0"):New("FliprDB", {
-        profile = defaultSettings
+        profile = {
+            -- Sale rate thresholds
+        highSaleRate = 0.4,      
+        mediumSaleRate = 0.2,    
+            -- Inventory limits
+        highInventory = 100,     
+        mediumInventory = 10,    
+        lowInventory = 5,
+        -- Profitability settings
+            minProfit = 1,           -- 1g minimum profit
+            highVolumeROI = 15,      -- 15% for fast movers
+            mediumVolumeROI = 25,    -- 25% for regular items
+            lowVolumeROI = 40,       -- 40% for slow movers
+            veryLowVolumeROI = 70,   -- 70% for very slow movers
+        unstableMarketMultiplier = 1.3,  -- 30% more profit needed in unstable markets
+        historicalLowMultiplier = 0.8,   -- 20% less ROI needed if prices are historically low
+            -- Mode settings
+            useTSMMode = true,       -- Use TSM operations by default
+        }
     })
+    
+    -- Create options panel
+    self:CreateOptionsPanel()
 end
 
 function FLIPR:OnEnable()
+    -- Register slash command to open settings
+    self:RegisterChatCommand("flipr", function() 
+        Settings.OpenToCategory("FLIPR")
+    end)
+    
     -- Register AH events
     self:RegisterEvent("AUCTION_HOUSE_SHOW", "OnAuctionHouseShow")
     self:RegisterEvent("AUCTION_HOUSE_CLOSED", "OnAuctionHouseClosed")
@@ -161,4 +187,31 @@ function FLIPR:OnEnable()
     -- Initialize scan timer
     self.scanTimer = 0
     self.scanStartTime = 0
+end
+
+function FLIPR:OnSlashCommand(input)
+    if input == "options" or input == "config" or input == "settings" then
+        Settings.OpenToCategory("FLIPR")
+        return
+    end
+    
+    if self.mainFrame:IsShown() then
+        self.mainFrame:Hide()
+    else
+        self.mainFrame:Show()
+    end
+end
+
+function FLIPR:OnAuctionHouseShow()
+    if not self.tabCreated then
+        self:CreateFLIPRTab()
+        self.tabCreated = true
+    end
+end
+
+function FLIPR:OnAuctionHouseClosed()
+    -- Reset scanning state
+    if self.isScanning then
+        self:CancelScan()
+    end
 end 

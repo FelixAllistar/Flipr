@@ -197,7 +197,13 @@ function FLIPR:ScanItems()
 
     -- Update initial progress
     if self.scanProgressText then
-        self.scanProgressText:SetText(string.format("0/%d items", #self.itemIDs))
+        self.scanProgressText:SetText(string.format("Scanning: 0/%d items", #self.itemIDs))
+    end
+    
+    -- Start timer
+    self.scanStartTime = time()
+    if self.timerFrame then
+        self.timerFrame:Show()
     end
 
     -- Track current item being scanned
@@ -514,17 +520,53 @@ function FLIPR:ProcessAuctionResults(results)
     -- Get sale rate for debug output
     local saleRate = self:GetItemSaleRate(itemID)
     
-    -- Analyze flip opportunity
-    local flipOpportunity = self:AnalyzeFlipOpportunity(results, itemID)
+    -- Check inventory limits based on mode
+    local maxInventory
+    local currentInventory = self:GetCurrentInventory(itemID)
+    
+    if self.db.profile.useTSM then
+        -- For TSM mode, get restock quantity from TSM operation
+        local operation = self:GetTSMShoppingOperation(itemID)
+        if not operation then
+            print(string.format("|cFFFFFF00%s: No TSM operation found|r", itemName))
+            return
+        end
+        maxInventory = operation.restockQuantity
+    else
+        -- For Classic mode, use our sale rate based limits
+        maxInventory = self:GetMaxInventoryForSaleRate_Classic(itemID)
+    end
+    
+    -- Skip if we're at or over inventory limit
+    if currentInventory >= maxInventory then
+        print(string.format("|cFFFFFF00%s: Full inventory %d/%d|r", itemName, currentInventory, maxInventory))
+        return
+    end
+    
+    -- Skip if first auction is too big
+    if results[1].totalQuantity > (maxInventory - currentInventory) then
+        print(string.format("|cFFFFFF00%s: First auction too big (%d), need %d or less|r", 
+            itemName, results[1].totalQuantity, maxInventory - currentInventory))
+        return
+    end
+    
+    -- Use the correct analysis function based on mode
+    local flipOpportunity
+    if self.db.profile.useTSM then
+        flipOpportunity = self:AnalyzeFlipOpportunity_TSM(results, itemID)
+    else
+        flipOpportunity = self:AnalyzeFlipOpportunity_Classic(results, itemID)
+    end
+    
     if flipOpportunity then
         -- Debug print in green for profitable items
         print(string.format(
             "|cFF00FF00Found flip for %s: Buy @ %s (x%d), Sell @ %s, Profit: %s, ROI: %d%%, Sale Rate: %s|r",
             itemName,
-            GetCoinTextureString(tonumber(flipOpportunity.avgBuyPrice) or 0),
+            C_CurrencyInfo.GetCoinTextureString(tonumber(flipOpportunity.avgBuyPrice) or 0),
             flipOpportunity.buyQuantity or 0,
-            GetCoinTextureString(tonumber(flipOpportunity.sellPrice) or 0),
-            GetCoinTextureString(tonumber(flipOpportunity.totalProfit) or 0),
+            C_CurrencyInfo.GetCoinTextureString(tonumber(flipOpportunity.sellPrice) or 0),
+            C_CurrencyInfo.GetCoinTextureString(tonumber(flipOpportunity.totalProfit) or 0),
             tonumber(flipOpportunity.roi) or 0,
             tostring(saleRate)
         ))
@@ -538,6 +580,11 @@ function FLIPR:ProcessAuctionResults(results)
             itemName,
             tostring(saleRate)
         ))
+    end
+
+    -- Update scan progress
+    if self.scanProgressText then
+        self.scanProgressText:SetText(string.format("Scanning: %d/%d items", self.currentScanIndex, #self.itemIDs))
     end
 end
 
@@ -615,5 +662,54 @@ end
 
 function FLIPR:OnAuctionHouseClosed()
     self:CancelPendingScans()
+end
+
+function FLIPR:OnScanComplete()
+    self.isScanning = false
+    self.isPaused = false
+    
+    -- Update UI
+    if self.scanProgressText then
+        self.scanProgressText:SetText("Scan Complete!")
+    end
+    if self.scanButton then
+        self.scanButton:SetText("Scan Items")
+    end
+    
+    -- Hide timer after 5 seconds
+    C_Timer.After(5, function()
+        if self.timerFrame then
+            self.timerFrame:Hide()
+        end
+        if self.scanProgressText then
+            self.scanProgressText:SetText("")
+        end
+    end)
+end
+
+function FLIPR:StartScan()
+    -- If we're already scanning, this acts as a pause/resume toggle
+    if self.isScanning then
+        if self.isPaused then
+            -- Resume scan
+            print("|cFF00FF00RESUMED|r")
+            self.isPaused = false
+            if self.scanButton then
+                self.scanButton:SetText("Pause Scan")
+            end
+            self:ScanNextItem()
+        else
+            -- Pause scan
+            print("|cFFFF0000PAUSED|r")
+            self.isPaused = true
+            if self.scanButton then
+                self.scanButton:SetText("Resume Scan")
+            end
+        end
+        return
+    end
+
+    -- Start new scan
+    self:ScanItems()
 end
   
