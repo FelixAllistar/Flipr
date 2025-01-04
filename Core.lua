@@ -7,126 +7,174 @@ addon.FLIPR = FLIPR
 local version = C_AddOns.GetAddOnMetadata(addonName, "Version") or "v0.070"
 addon.version = version  -- Make version accessible to other files
 
--- Default scan items
-local defaultItems = {
-    "Light Leather",
-    "Medium Leather"
-}
-
+-- Define default settings
 local defaultSettings = {
-    items = defaultItems,
-    showConfirm = true,
-    enabledGroups = {},  -- Will be populated dynamically
-    expandedGroups = {}  -- Track which groups are expanded in the UI
+    -- UI settings
+    expandedGroups = {},  -- Track which groups are expanded in the UI
+    enabledGroups = {},   -- Track which groups are enabled
+    -- Inventory control settings
+    
+    -- Profitability settings
+    minProfit = 1,         -- 1g minimum profit
+    highVolumeROI = 15,    -- 15% for fast movers
+    mediumVolumeROI = 25,  -- 25% for regular items
+    lowVolumeROI = 40,     -- 40% for slow movers
+    veryLowVolumeROI = 70, -- 70% for very slow movers
 }
 
-function FLIPR:GetAvailableGroups()
-    local groups = {}
-    print("Scanning for available groups...")
-    -- Look for FLIPR_ tables in _G
-    for name, value in pairs(_G) do
-        if type(value) == "table" and name:match("^FLIPR_") then
-            print("Found group table:", name)
-            -- Store reference to the table
-            groups[name] = value
+-- Helper function to get TSM group path for an item
+function FLIPR:GetTSMGroupPath(itemID)
+    if not TradeSkillMasterDB then return nil end
+    local itemString = "i:" .. itemID
+    return TradeSkillMasterDB["p@Default@userData@items"][itemString]
+end
+
+-- Helper function to get TSM operations for a group
+function FLIPR:GetTSMGroupOperations(groupPath)
+    if not TradeSkillMasterDB then return {} end
+    local operationsTable = TradeSkillMasterDB["p@Default@userData@groups"]
+    if not operationsTable or not operationsTable[groupPath] then return {} end
+    
+    local ops = {}
+    for moduleName, moduleData in pairs(operationsTable[groupPath]) do
+        if type(moduleData) == "table" then
+            -- The operations are directly in the moduleData table as numbered indices
+            local operations = {}
+            for i, op in ipairs(moduleData) do
+                table.insert(operations, op)
+            end
+            if #operations > 0 then
+                ops[moduleName] = {
+                    override = moduleData.override,
+                    operations = operations
+                }
+            end
         end
     end
-    print("Total group tables found:", #groups)
+    return ops
+end
+
+-- Helper function to get operation details
+function FLIPR:GetTSMOperationDetails(moduleName, operationName)
+    if not TradeSkillMasterDB then return nil end
+    local operationsData = TradeSkillMasterDB["p@Default@userData@operations"]
+    if not operationsData or not operationsData[moduleName] or not operationsData[moduleName][operationName] then
+        return nil
+    end
+    return operationsData[moduleName][operationName]
+end
+
+-- Get all TSM shopping operations for an item
+function FLIPR:GetTSMShoppingOperations(itemID)
+    local groupPath = self:GetTSMGroupPath(itemID)
+    if not groupPath then return nil end
+    
+    local groupOps = self:GetTSMGroupOperations(groupPath)
+    if not groupOps or not groupOps.Shopping then return nil end
+    
+    local operations = {}
+    for _, opName in ipairs(groupOps.Shopping.operations) do
+        local details = self:GetTSMOperationDetails("Shopping", opName)
+        if details then
+            table.insert(operations, {
+                name = opName,
+                maxPrice = details.maxPrice,
+                restockQuantity = details.restockQuantity
+            })
+        end
+    end
+    
+    return operations
+end
+
+-- Get all unique TSM groups
+function FLIPR:GetTSMGroups()
+    if not TradeSkillMasterDB then return {} end
+    
+    local itemsTable = TradeSkillMasterDB["p@Default@userData@items"]
+    if not itemsTable then return {} end
+    
+    -- Build a table of unique groups
+    local groups = {}
+    for _, groupPath in pairs(itemsTable) do
+        -- Split the path into parts
+        local parts = {strsplit("`", groupPath)}
+        local currentPath = ""
+        
+        -- Add each level of the group hierarchy
+        for i, part in ipairs(parts) do
+            if i == 1 then
+                currentPath = part
+            else
+                currentPath = currentPath .. "`" .. part
+            end
+            groups[currentPath] = true
+        end
+    end
+    
     return groups
 end
 
-function FLIPR:GetItemsFromGroup(groupTable, path)
+-- Get all items in a TSM group
+function FLIPR:GetTSMGroupItems(groupPath)
+    if not TradeSkillMasterDB then return {} end
+    
+    local itemsTable = TradeSkillMasterDB["p@Default@userData@items"]
+    if not itemsTable then return {} end
+    
     local items = {}
-    local currentTable = groupTable
-    
-    -- If no path specified, return all items recursively
-    if not path then
-        if currentTable.items then
-            for itemId, itemData in pairs(currentTable.items) do
-                items[itemId] = itemData
+    for itemString, path in pairs(itemsTable) do
+        if path == groupPath or path:match("^" .. groupPath .. "`") then
+            local itemID = itemString:match("i:(%d+)")
+            if itemID then
+                items[tonumber(itemID)] = true
             end
-        end
-        -- Recursively get items from subgroups
-        for key, value in pairs(currentTable) do
-            if type(value) == "table" and key ~= "items" and key ~= "name" then
-                local subItems = self:GetItemsFromGroup(value)
-                for itemId, itemData in pairs(subItems) do
-                    items[itemId] = itemData
-                end
-            end
-        end
-        return items
-    end
-    
-    -- Navigate through the path
-    local pathParts = {strsplit("/", path)}
-    for _, part in ipairs(pathParts) do
-        if currentTable[part] then
-            currentTable = currentTable[part]
-        else
-            return {}  -- Path not found
         end
     end
     
-    -- Return items from this level and below
-    return self:GetItemsFromGroup(currentTable)
+    return items
 end
 
+-- Initialize addon
 function FLIPR:OnInitialize()
-    -- Initialize groups database
-    FliprDB = FliprDB or {
-        groups = {},
-        version = 1,
-        -- UI settings
-        showConfirm = true,
-        enabledGroups = {},      
-        expandedGroups = {}      
-    }
-    
-    -- Initialize profitability settings separately
-    FliprSettings = FliprSettings or {
-        version = 1,
-        -- Inventory control settings
+    -- Initialize database
+    self.db = LibStub("AceDB-3.0"):New("FliprDB", {
+        profile = {
+            -- Sale rate thresholds
         highSaleRate = 0.4,      
         mediumSaleRate = 0.2,    
+            -- Inventory limits
         highInventory = 100,     
         mediumInventory = 10,    
         lowInventory = 5,
         -- Profitability settings
-        minProfit = 1000,         -- 10 silver minimum profit
-        highVolumeROI = 15,       -- 15% for fast movers
-        mediumVolumeROI = 25,     -- 25% for regular items
-        lowVolumeROI = 40,        -- 40% for slow movers
-        veryLowVolumeROI = 70,    -- 70% for very slow movers
+            minProfit = 1,           -- 1g minimum profit
+            highVolumeROI = 15,      -- 15% for fast movers
+            mediumVolumeROI = 25,    -- 25% for regular items
+            lowVolumeROI = 40,       -- 40% for slow movers
+            veryLowVolumeROI = 70,   -- 70% for very slow movers
         unstableMarketMultiplier = 1.3,  -- 30% more profit needed in unstable markets
         historicalLowMultiplier = 0.8,   -- 20% less ROI needed if prices are historically low
-    }
+            -- Mode settings
+            useTSMMode = true,       -- Use TSM operations by default
+        }
+    })
     
-    -- Set references
-    self.db = FliprSettings      -- For profitability settings
-    self.groupDB = FliprDB       -- For groups data and UI settings
-    
-    -- Initialize database
-    self:InitializeDB()
-    
-    -- Initialize available groups
-    self.availableGroups = self:GetAvailableGroups()
-    
-    -- Create options panel (moved to after database initialization)
+    -- Create options panel
     self:CreateOptionsPanel()
-    
-    -- Register slash commands
-    self:RegisterChatCommand("flipr", "HandleSlashCommand")
-    
-    print("FLIPR Settings and Database loaded")
 end
 
 function FLIPR:OnEnable()
-    -- Initialize UI events
+    -- Register slash command to open settings
+    self:RegisterChatCommand("flipr", function() 
+        Settings.OpenToCategory("FLIPR")
+    end)
+    
+    -- Register AH events
     self:RegisterEvent("AUCTION_HOUSE_SHOW", "OnAuctionHouseShow")
     self:RegisterEvent("AUCTION_HOUSE_CLOSED", "OnAuctionHouseClosed")
     
-    -- Initialize scanner
+    -- Initialize scanner state
     self.selectedRow = nil
     self.selectedItem = nil
     self.isScanning = false
@@ -139,78 +187,31 @@ function FLIPR:OnEnable()
     -- Initialize scan timer
     self.scanTimer = 0
     self.scanStartTime = 0
-    
-    -- Debug print
-    print("FLIPR enabled - All systems initialized")
 end
 
-function FLIPR:HandleSlashCommand(input)
-    -- Split input into command and value
-    local command, value = strsplit(" ", input)
-    
-    if not command or command == "" then
-        -- Open options panel if no command
+function FLIPR:OnSlashCommand(input)
+    if input == "options" or input == "config" or input == "settings" then
         Settings.OpenToCategory("FLIPR")
         return
     end
     
-    -- Convert value to number if provided
-    local numValue = tonumber(value)
-    
-    -- Handle different commands
-    if command == "hsr" or command == "highsale" then
-        if not numValue then
-            self:Print("Usage: /flipr hsr <value> (0-1)")
-            return
-        end
-        numValue = math.min(math.max(math.floor(numValue * 1000) / 1000, 0), 1)
-        self.db.highSaleRate = numValue
-        self:Print("High sale rate set to:", numValue)
-        
-    elseif command == "msr" or command == "medsale" then
-        if not numValue then
-            self:Print("Usage: /flipr msr <value> (0-1)")
-            return
-        end
-        numValue = math.min(math.max(math.floor(numValue * 1000) / 1000, 0), 1)
-        self.db.mediumSaleRate = numValue
-        self:Print("Medium sale rate set to:", numValue)
-        
-    elseif command == "hi" or command == "highinv" then
-        if not numValue then
-            self:Print("Usage: /flipr hi <value> (1-200)")
-            return
-        end
-        numValue = math.min(math.max(math.floor(numValue), 1), 200)
-        self.db.highInventory = numValue
-        self:Print("High inventory limit set to:", numValue)
-        
-    elseif command == "mi" or command == "medinv" then
-        if not numValue then
-            self:Print("Usage: /flipr mi <value> (1-50)")
-            return
-        end
-        numValue = math.min(math.max(math.floor(numValue), 1), 50)
-        self.db.mediumInventory = numValue
-        self:Print("Medium inventory limit set to:", numValue)
-        
-    elseif command == "li" or command == "lowinv" then
-        if not numValue then
-            self:Print("Usage: /flipr li <value> (1-20)")
-            return
-        end
-        numValue = math.min(math.max(math.floor(numValue), 1), 20)
-        self.db.lowInventory = numValue
-        self:Print("Low inventory limit set to:", numValue)
-        
+    if self.mainFrame:IsShown() then
+        self.mainFrame:Hide()
     else
-        -- Print usage
-        self:Print("FLIPR Commands:")
-        self:Print("  /flipr - Open settings")
-        self:Print("  /flipr hsr <0-1> - Set high sale rate")
-        self:Print("  /flipr msr <0-1> - Set medium sale rate")
-        self:Print("  /flipr hi <1-200> - Set high inventory limit")
-        self:Print("  /flipr mi <1-50> - Set medium inventory limit")
-        self:Print("  /flipr li <1-20> - Set low inventory limit")
+        self.mainFrame:Show()
+    end
+end
+
+function FLIPR:OnAuctionHouseShow()
+    if not self.tabCreated then
+        self:CreateFLIPRTab()
+        self.tabCreated = true
+    end
+end
+
+function FLIPR:OnAuctionHouseClosed()
+    -- Reset scanning state
+    if self.isScanning then
+        self:CancelScan()
     end
 end 

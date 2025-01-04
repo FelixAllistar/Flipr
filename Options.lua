@@ -86,11 +86,7 @@ local function CreateSettingRow(parent, label, yOffset, dbKey, maxValue, isProfi
         UpdateValueText(value)
         
         -- Update the database
-        if isProfitSetting then
-            FLIPR.db[dbKey] = value
-        else
-            FLIPR.groupDB[dbKey] = value
-        end
+        FLIPR.db.profile[dbKey] = value
     end
     
     -- Slider scripts
@@ -114,7 +110,7 @@ local function CreateSettingRow(parent, label, yOffset, dbKey, maxValue, isProfi
     end)
     
     -- Initial value
-    local initialValue = isProfitSetting and FLIPR.db[dbKey] or FLIPR.groupDB[dbKey] or 0
+    local initialValue = FLIPR.db.profile[dbKey] or 0
     if maxValue ~= 1 then
         initialValue = math.floor(initialValue + 0.5)  -- Round to nearest integer
     end
@@ -133,1080 +129,189 @@ local function CreateSettingRow(parent, label, yOffset, dbKey, maxValue, isProfi
 end
 
 function FLIPR:CreateOptionsPanel()
-    local panel = CreateFrame("Frame")
-    panel.name = "FLIPR"
-    panel:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
-    
-    -- Create tab group at the top
-    local tabGroup = CreateFrame("Frame", "FliprOptionsTabGroup", panel)
-    tabGroup:SetPoint("TOPLEFT", panel, "TOPLEFT", 20, -10)
-    tabGroup:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -20, 0)
-    
-    -- Initialize tab system
-    panel.tabs = {}
-    panel.numTabs = 3
-    
-    -- Create tab buttons
-    local function CreateTab(text, index)
-        local tab = CreateFrame("Button", "FliprOptionsTab"..index, panel, "PanelTabButtonTemplate")
-        tab:SetText(text)
-        tab:SetID(index)
-        if index == 1 then
-            tab:SetPoint("TOPLEFT", tabGroup, "TOPLEFT", 5, 0)
-        else
-            tab:SetPoint("LEFT", _G["FliprOptionsTab"..(index-1)], "RIGHT", -15, 0)
-        end
-        
-        -- Set up tab appearance
-        tab:SetSize(115, 32)
-        
-        -- Create tab content frame with background
-        tab.content = CreateFrame("Frame", nil, tabGroup, "BackdropTemplate")
-        tab.content:SetPoint("TOPLEFT", tabGroup, "TOPLEFT", 0, -30)
-        tab.content:SetPoint("BOTTOMRIGHT", tabGroup, "BOTTOMRIGHT", 0, -5)
-        tab.content:Hide()
-        
-        -- Set up backdrop with no bottom inset
-        tab.content:SetBackdrop({
-            bgFile = "Interface/Tooltips/UI-Tooltip-Background",
-            edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
-            tile = true,
-            tileEdge = true,
-            tileSize = 16,
-            edgeSize = 16,
-            insets = { left = 4, right = 4, top = 4, bottom = 0 }
-        })
-        tab.content:SetBackdropColor(0.1, 0.1, 0.1, 0.5)
-        tab.content:SetBackdropBorderColor(0.4, 0.4, 0.4)
-        
-        -- Add tab to panel's tabs array
-        panel.tabs[index] = tab
-        
-        return tab
-    end
-    
-    -- Create tabs
-    local generalTab = CreateTab("General", 1)
-    local operationsTab = CreateTab("Operations", 2)
-    local groupsTab = CreateTab("Groups", 3)
-    
-    -- Initialize tab system after creating tabs
-    PanelTemplates_SetNumTabs(panel, panel.numTabs)
-    
-    -- Store references
-    panel.selectedTab = 1
-    
-    -- Tab click handler
-    local function OnTabClick(tab)
-        PanelTemplates_SetTab(panel, tab:GetID())
-        -- Hide all content frames
-        for _, t in ipairs(panel.tabs) do
-            t.content:Hide()
-        end
-        -- Show selected content
-        tab.content:Show()
-        panel.selectedTab = tab:GetID()
-    end
-    
-    -- Set up tab click scripts
-    for _, tab in ipairs(panel.tabs) do
-        tab:SetScript("OnClick", function(self) OnTabClick(self) end)
-    end
-    
-    -- Create the general settings content
-    local function CreateGeneralSettings(parent)
-        -- Create the scroll frame
-        local scrollFrame = CreateFrame("ScrollFrame", nil, parent, "UIPanelScrollFrameTemplate")
-        scrollFrame:SetPoint("TOPLEFT", parent, "TOPLEFT", 16, -16)
-        scrollFrame:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -36, 16)
-        
-        -- Create the scrolling content frame
-        local scrollChild = CreateFrame("Frame", nil, scrollFrame)
-        scrollChild:SetPoint("TOPLEFT", scrollFrame, "TOPLEFT", 0, 0)
-        scrollChild:SetSize(scrollFrame:GetWidth() - 30, 1)
-        scrollFrame:SetScrollChild(scrollChild)
-        
-        -- Create settings sections
-        local yOffset = -30  -- Increased initial offset from -10 to -30
-        
-        -- Sale Rate Settings Header
-        local saleRateHeader = scrollChild:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-        saleRateHeader:SetPoint("TOP", scrollChild, "TOP", 280, yOffset)
-        saleRateHeader:SetText("Sale Rate Thresholds")
-        
-        yOffset = yOffset - 30
-        CreateSettingRow(scrollChild, "High Sale Rate", yOffset, "highSaleRate", 1, true)
-        
-        yOffset = yOffset - 30
-        CreateSettingRow(scrollChild, "Medium Sale Rate", yOffset, "mediumSaleRate", 1, true)
-        
-        yOffset = yOffset - 60  -- Increased space before next header from -40 to -60
-        
-        -- Inventory Settings Header
-        local inventoryHeader = scrollChild:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-        inventoryHeader:SetPoint("TOP", scrollChild, "TOP", 280, yOffset)
-        inventoryHeader:SetText("Inventory Limits")
-        
-        yOffset = yOffset - 30
-        CreateSettingRow(scrollChild, "High Inventory", yOffset, "highInventory", 200, true)
-        
-        yOffset = yOffset - 30
-        CreateSettingRow(scrollChild, "Medium Inventory", yOffset, "mediumInventory", 50, true)
-        
-        yOffset = yOffset - 30
-        CreateSettingRow(scrollChild, "Low Inventory", yOffset, "lowInventory", 20, true)
-        
-        -- Set final height of the scrollChild based on the content
-        scrollChild:SetHeight(math.abs(yOffset) + 20)
-        
-        -- Make sure the parent frame is visible and sized
-        parent:SetSize(parent:GetParent():GetWidth(), parent:GetParent():GetHeight())
-        parent:Show()
-        
-        return scrollFrame
-    end
-    
-    -- Create the operations content
-    local function CreateOperationsContent(parent)
-        -- Create the scroll frame
-        local scrollFrame = CreateFrame("ScrollFrame", nil, parent, "UIPanelScrollFrameTemplate")
-        scrollFrame:SetPoint("TOPLEFT", parent, "TOPLEFT", 16, -16)
-        scrollFrame:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -36, 16)
-        
-        -- Create the scrolling content frame
-        local scrollChild = CreateFrame("Frame", nil, scrollFrame)
-        scrollChild:SetPoint("TOPLEFT", scrollFrame, "TOPLEFT", 0, -20)
-        scrollChild:SetWidth(scrollFrame:GetWidth() - 30)
-        scrollFrame:SetScrollChild(scrollChild)
-        
-        local yOffset = -50
-        local contentHeight = 0
-        
-        -- Operations Header
-        local header = scrollChild:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-        header:SetPoint("TOP", scrollChild, "TOP", 280, yOffset)
-        header:SetText("TSM Operations")
-        contentHeight = contentHeight + 30
-        
-        yOffset = yOffset - 30
-        
-        -- Function to create operation section
-        local function CreateOperationSection(moduleName, operations, startOffset)
-            local moduleHeader = scrollChild:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-            moduleHeader:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 40, startOffset)
-            moduleHeader:SetText(moduleName)
-            contentHeight = contentHeight + 20
-            
-            local offset = startOffset - 20
-            
-            if operations then
-                for opName, opSettings in pairs(operations) do
-                    local opHeader = scrollChild:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-                    opHeader:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 60, offset)
-                    opHeader:SetText(opName)
-                    contentHeight = contentHeight + 20
-                    
-                    offset = offset - 20
-                    
-                    -- Display operation settings
-                    for setting, value in pairs(opSettings) do
-                        local settingText = scrollChild:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-                        settingText:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 80, offset)
-                        settingText:SetText(string.format("%s: %s", setting, tostring(value)))
-                        
-                        offset = offset - 15
-                        contentHeight = contentHeight + 15
-                    end
-                    
-                    -- Add groups using this operation
-                    local groupsUsingOp = {}
-                    for groupName, groupData in pairs(self.groupDB.groups) do
-                        -- Check if this group or any of its subgroups use the operation
-                        local function checkGroup(group, parentPath)
-                            local currentPath = parentPath and (parentPath .. "/" .. group.name) or group.name
-                            
-                            -- Check if this group uses the operation
-                            if group.operations and 
-                               group.operations[moduleName] and 
-                               group.operations[moduleName][opName] then
-                                table.insert(groupsUsingOp, currentPath)
-                            end
-                            
-                            -- Check subgroups
-                            if group.subgroups then
-                                for _, subgroup in pairs(group.subgroups) do
-                                    checkGroup(subgroup, currentPath)
-                                end
-                            end
-                        end
-                        
-                        -- Start checking from the root group
-                        checkGroup(groupData)
-                    end
-                    
-                    if #groupsUsingOp > 0 then
-                        offset = offset - 15  -- Extra space before groups list
-                        local groupsText = scrollChild:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-                        groupsText:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 80, offset)
-                        groupsText:SetTextColor(0.7, 0.7, 0.7)  -- Light gray color
-                        groupsText:SetText("Groups: " .. table.concat(groupsUsingOp, ", "))
-                        
-                        offset = offset - 15
-                        contentHeight = contentHeight + 30  -- Account for groups text and spacing
-                    end
-                    
-                    offset = offset - 10
-                    contentHeight = contentHeight + 10
-                end
-            else
-                local noOpsText = scrollChild:CreateFontString(nil, "ARTWORK", "GameFontDisable")
-                noOpsText:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 60, offset)
-                noOpsText:SetText("No operations found")
-                contentHeight = contentHeight + 20
-                offset = offset - 30
-            end
-            
-            return offset
-        end
-        
-        -- Get operations from the first group (they're shared)
-        local operations = nil
-        for groupName, groupData in pairs(self.groupDB.groups) do
-            if groupData.operations then
-                operations = groupData.operations
-                break
-            end
-        end
-        
-        -- Create sections for each module type
-        local moduleTypes = {"Auctioning", "Shopping", "Crafting", "Vendoring", "Warehousing", "Mailing", "Sniper"}
-        for _, moduleName in ipairs(moduleTypes) do
-            if operations and operations[moduleName] then
-                yOffset = CreateOperationSection(moduleName, operations[moduleName], yOffset)
-            else
-                yOffset = CreateOperationSection(moduleName, nil, yOffset)
-            end
-            yOffset = yOffset - 20  -- Space between modules
-            contentHeight = contentHeight + 20
-        end
-        
-        -- Set final height with additional padding
-        scrollChild:SetHeight(contentHeight + 150)
-        
-        scrollFrame:SetScrollChild(scrollChild)
-        return scrollFrame
-    end
-    
-    -- Create the groups content
-    local function CreateGroupsContent(parent)
-        print("=== CreateGroupsContent START ===")
-        
-        -- Create container frame first
-        local container = CreateFrame("Frame", "FliprGroupsContainer", parent)
-        container:SetAllPoints()
-        container:SetFrameLevel(parent:GetFrameLevel() + 1)
-        
-        -- Initialize database tables first
-        if not FLIPR.db then FLIPR.db = {} end
-        if not FLIPR.db.expandedGroups then FLIPR.db.expandedGroups = {} end
-        if not FLIPR.db.enabledGroups then FLIPR.db.enabledGroups = {} end
+    local options = {
+        type = "group",
+        name = "FLIPR",
+        args = {
+            modeSettings = {
+                type = "group",
+                name = "Mode Settings",
+                order = 0,
+                args = {
+                    useTSMMode = {
+                        type = "toggle",
+                        name = "Use TSM Mode",
+                        desc = "Use TSM's shopping operations for maxPrice and restockQuantity",
+                        get = function() return self.db.profile.useTSMMode end,
+                        set = function(_, value) 
+                            self.db.profile.useTSMMode = value 
+                            print(string.format("|cFF00FF00FLIPR: Switched to %s mode|r", value and "TSM" or "Classic"))
+                        end,
+                        order = 1,
+                    },
+                    modeDescription = {
+                        type = "description",
+                        name = "TSM Mode: Uses TSM's shopping operations for maxPrice and restockQuantity.\nClassic Mode: Uses price gaps between auctions to find flips.",
+                        order = 2,
+                    },
+                },
+            },
+            saleRateSettings = {
+                type = "group",
+                name = "Sale Rate Settings",
+                order = 1,
+                args = {
+                    highSaleRate = {
+                        type = "range",
+                        name = "High Sale Rate",
+                        desc = "Sale rate threshold for high volume items",
+                        min = 0,
+                        max = 1,
+                        step = 0.01,
+                        get = function() return self.db.profile.highSaleRate end,
+                        set = function(_, value) self.db.profile.highSaleRate = value end,
+                        order = 1,
+                    },
+                    mediumSaleRate = {
+                        type = "range",
+                        name = "Medium Sale Rate",
+                        desc = "Sale rate threshold for medium volume items",
+                        min = 0,
+                        max = 1,
+                        step = 0.01,
+                        get = function() return self.db.profile.mediumSaleRate end,
+                        set = function(_, value) self.db.profile.mediumSaleRate = value end,
+                        order = 2,
+                    },
+                },
+            },
+            inventorySettings = {
+                type = "group",
+                name = "Inventory Settings",
+                order = 2,
+                args = {
+                    highInventory = {
+                        type = "range",
+                        name = "High Inventory",
+                        desc = "Maximum inventory for high volume items",
+                        min = 0,
+                        max = 200,
+                        step = 1,
+                        get = function() return self.db.profile.highInventory end,
+                        set = function(_, value) self.db.profile.highInventory = value end,
+                        order = 1,
+                    },
+                    mediumInventory = {
+                        type = "range",
+                        name = "Medium Inventory",
+                        desc = "Maximum inventory for medium volume items",
+                        min = 0,
+                        max = 50,
+                        step = 1,
+                        get = function() return self.db.profile.mediumInventory end,
+                        set = function(_, value) self.db.profile.mediumInventory = value end,
+                        order = 2,
+                    },
+                    lowInventory = {
+                        type = "range",
+                        name = "Low Inventory",
+                        desc = "Maximum inventory for low volume items",
+                        min = 0,
+                        max = 20,
+                        step = 1,
+                        get = function() return self.db.profile.lowInventory end,
+                        set = function(_, value) self.db.profile.lowInventory = value end,
+                        order = 3,
+                    },
+                },
+            },
+            profitabilitySettings = {
+                type = "group",
+                name = "Profitability Settings",
+                order = 3,
+                args = {
+                    minProfit = {
+                        type = "range",
+                        name = "Minimum Profit (gold)",
+                        desc = "Minimum profit required for a flip",
+                        min = 0,
+                        max = 100,
+                        step = 1,
+                        get = function() return self.db.profile.minProfit end,
+                        set = function(_, value) self.db.profile.minProfit = value end,
+                        order = 1,
+                    },
+                    highVolumeROI = {
+                        type = "range",
+                        name = "High Volume ROI (%)",
+                        desc = "Required ROI for high volume items",
+                        min = 0,
+                        max = 100,
+                        step = 1,
+                        get = function() return self.db.profile.highVolumeROI end,
+                        set = function(_, value) self.db.profile.highVolumeROI = value end,
+                        order = 2,
+                    },
+                    mediumVolumeROI = {
+                        type = "range",
+                        name = "Medium Volume ROI (%)",
+                        desc = "Required ROI for medium volume items",
+                        min = 0,
+                        max = 100,
+                        step = 1,
+                        get = function() return self.db.profile.mediumVolumeROI end,
+                        set = function(_, value) self.db.profile.mediumVolumeROI = value end,
+                        order = 3,
+                    },
+                    lowVolumeROI = {
+                        type = "range",
+                        name = "Low Volume ROI (%)",
+                        desc = "Required ROI for low volume items",
+                        min = 0,
+                        max = 100,
+                        step = 1,
+                        get = function() return self.db.profile.lowVolumeROI end,
+                        set = function(_, value) self.db.profile.lowVolumeROI = value end,
+                        order = 4,
+                    },
+                    veryLowVolumeROI = {
+                        type = "range",
+                        name = "Very Low Volume ROI (%)",
+                        desc = "Required ROI for very low volume items",
+                        min = 0,
+                        max = 100,
+                        step = 1,
+                        get = function() return self.db.profile.veryLowVolumeROI end,
+                        set = function(_, value) self.db.profile.veryLowVolumeROI = value end,
+                        order = 5,
+                    },
+                    unstableMarketMultiplier = {
+                        type = "range",
+                        name = "Unstable Market Multiplier",
+                        desc = "Profit multiplier for unstable markets",
+                        min = 1,
+                        max = 2,
+                        step = 0.1,
+                        get = function() return self.db.profile.unstableMarketMultiplier end,
+                        set = function(_, value) self.db.profile.unstableMarketMultiplier = value end,
+                        order = 6,
+                    },
+                    historicalLowMultiplier = {
+                        type = "range",
+                        name = "Historical Low Multiplier",
+                        desc = "Profit multiplier for historically low prices",
+                        min = 0,
+                        max = 1,
+                        step = 0.1,
+                        get = function() return self.db.profile.historicalLowMultiplier end,
+                        set = function(_, value) self.db.profile.historicalLowMultiplier = value end,
+                        order = 7,
+                    },
+                },
+            },
+        },
+    }
 
-        -- Initialize available groups from existing data
-        if not FLIPR.availableGroups then
-            print("Getting available groups...")
-            FLIPR.availableGroups = FLIPR:GetAvailableGroups()
-            -- Debug print the groups structure
-            for groupName, groupData in pairs(FLIPR.availableGroups) do
-                print("Group:", groupName)
-                if groupData.items then
-                    print("  Items:", CountTable(groupData.items))
-                    for itemID in pairs(groupData.items) do
-                        print(string.format("  - Item %d", itemID))
-                    end
-                end
-            end
-        end
-        
-        -- Create all the UI elements
-        local treePanel = CreateFrame("Frame", "FliprTreePanel", container, BackdropTemplateMixin and "BackdropTemplate")
-        treePanel:SetPoint("TOPLEFT", container, "TOPLEFT", 16, -16)
-        treePanel:SetPoint("BOTTOMLEFT", container, "BOTTOMLEFT", 216, 16)
-        treePanel:SetWidth(200)
-        treePanel:SetHeight(400)
-        
-        -- Set up tree panel backdrop
-        treePanel:SetBackdrop({
-            bgFile = "Interface/Tooltips/UI-Tooltip-Background",
-            edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
-            tile = true, tileSize = 16, edgeSize = 16,
-            insets = { left = 4, right = 4, top = 4, bottom = 4 }
-        })
-        treePanel:SetBackdropColor(0.1, 0.1, 0.1, 0.8)
-        treePanel:SetBackdropBorderColor(0.6, 0.6, 0.6)
-        
-        -- Create scroll frame
-        local treeScroll = CreateFrame("ScrollFrame", "FliprTreeScroll", treePanel, "UIPanelScrollFrameTemplate")
-        treeScroll:SetPoint("TOPLEFT", treePanel, "TOPLEFT", 8, -30)
-        treeScroll:SetPoint("BOTTOMRIGHT", treePanel, "BOTTOMRIGHT", -28, 8)
-        
-        -- Create tree content
-        local treeContent = CreateFrame("Frame", "FliprTreeContent", treeScroll)
-        treeContent:SetWidth(treeScroll:GetWidth())
-        treeContent:SetHeight(400)
-        
-        -- Add GROUPS label
-        local groupsLabel = treePanel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-        groupsLabel:SetPoint("TOP", treePanel, "TOP", 0, -8)
-        groupsLabel:SetText("GROUPS")
-        groupsLabel:SetTextColor(1, 0.82, 0, 1)
-        
-        -- Add debug background
-        local treeBg = treeContent:CreateTexture(nil, "BACKGROUND")
-        treeBg:SetAllPoints()
-        treeBg:SetColorTexture(0.2, 0, 0, 0.3)
-        
-        treeScroll:SetScrollChild(treeContent)
-        
-        -- Store these in the container for reference
-        container.treePanel = treePanel
-        container.treeScroll = treeScroll
-        container.treeContent = treeContent
-        
-        -- Define CreateGroupTreeItem function FIRST
-        local function CreateGroupTreeItem(groupData, parentPath, yOffset, level)
-            print(string.format("Creating tree item: %s (level %d, yOffset %d)", 
-                groupData and groupData.name or "nil", level, yOffset))
-            
-            if not groupData or not groupData.name then 
-                print("  Invalid group data")
-                return yOffset 
-            end
-            
-            -- Construct the full path properly
-            local currentPath = parentPath and (parentPath .. "/" .. groupData.name) or groupData.name
-            print("Constructed path:", currentPath)
-            local indent = level * 20
-            
-            -- Create container frame
-            local itemContainer = CreateFrame("Frame", nil, treeContent)
-            itemContainer:SetSize(treeContent:GetWidth() - indent, level == 0 and 22 or 18)  -- Slightly smaller for both
-            itemContainer:SetPoint("TOPLEFT", treeContent, "TOPLEFT", level == 0 and 0 or indent + 15, yOffset)  -- More indent for children
-            
-            -- Add background frame BEHIND everything
-            local bgFrame = CreateFrame("Frame", nil, itemContainer)
-            bgFrame:SetAllPoints()
-            bgFrame:SetFrameLevel(itemContainer:GetFrameLevel())  -- Put at base level
-            
-            -- Add background texture to bgFrame
-            local containerBg = bgFrame:CreateTexture(nil, "BACKGROUND")
-            containerBg:SetAllPoints()
-            containerBg:SetColorTexture(0.1, 0.1, 0.1, 0.3)  -- Start with dark color
-            
-            -- Create expand button if needed (on top of background)
-            local expandButton
-            if groupData.children and next(groupData.children) then
-                expandButton = CreateFrame("Button", nil, itemContainer)
-                expandButton:SetFrameLevel(itemContainer:GetFrameLevel() + 1)  -- Above background
-                expandButton:SetSize(14, 14)  -- Slightly smaller buttons
-                expandButton:SetPoint("LEFT", itemContainer, "LEFT", 0, 0)
-                
-                local expandTexture = expandButton:CreateTexture(nil, "ARTWORK")
-                expandTexture:SetAllPoints()
-                expandTexture:SetTexture(FLIPR.db.expandedGroups[currentPath] and 
-                    "Interface\\Buttons\\UI-MinusButton-Up" or 
-                    "Interface\\Buttons\\UI-PlusButton-Up")
-                
-                -- Store RefreshTreeView reference for the click handler
-                expandButton:SetScript("OnClick", function()
-                    print("Expand button clicked for:", currentPath)
-                    FLIPR.db.expandedGroups[currentPath] = not FLIPR.db.expandedGroups[currentPath]
-                    container.RefreshTreeView()  -- Use container reference
-                end)
-            end
-            
-            -- Create checkbox (on top of background)
-            local checkbox = CreateFrame("CheckButton", nil, itemContainer, "ChatConfigCheckButtonTemplate")
-            checkbox:SetFrameLevel(itemContainer:GetFrameLevel() + 1)  -- Above background
-            checkbox:SetPoint("LEFT", expandButton or itemContainer, "LEFT", expandButton and 16 or 0, 0)  -- Adjusted spacing
-            checkbox:SetChecked(FLIPR.db.enabledGroups[currentPath] or false)
-            
-            checkbox.Text:SetText(groupData.name)
-            checkbox.Text:SetFontObject(level == 0 and "GameFontNormal" or "GameFontNormalSmall")  -- Smaller text for both
-            checkbox.Text:SetTextColor(1, 1, 1)
-            
-            -- Function to recursively update child checkboxes
-            local function UpdateChildStates(path, state)
-                -- Update current group
-                FLIPR.db.enabledGroups[path] = state
-                
-                -- Get the root group and navigate to current node
-                local rootGroupName = strsplit("/", path)
-                local rootGroup = FliprDB.groups[rootGroupName]
-                if not rootGroup then return end
-                
-                local currentNode = rootGroup
-                local pathParts = {strsplit("/", path)}
-                
-                for i, part in ipairs(pathParts) do
-                    if i == 1 then
-                        if currentNode.name ~= part then return end
-                    else
-                        if currentNode.children and currentNode.children[part] then
-                            currentNode = currentNode.children[part]
-                        else
-                            return
-                        end
-                    end
-                end
-                
-                -- Update all children recursively
-                if currentNode.children then
-                    for childName, _ in pairs(currentNode.children) do
-                        local childPath = path .. "/" .. childName
-                        UpdateChildStates(childPath, state)
-                    end
-                end
-            end
-            
-            -- Define UpdateBackground function
-            local function UpdateBackground()
-                if checkbox:GetChecked() then
-                    containerBg:SetColorTexture(0, 1, 0, 0.3)  -- Green when checked
-                else
-                    containerBg:SetColorTexture(0.1, 0.1, 0.1, 0.3)  -- Dark when unchecked
-                end
-            end
-            
-            -- Initial background update
-            UpdateBackground()
-            
-            -- Add checkbox click handler
-            checkbox:SetScript("OnClick", function()
-                print("=== Checkbox OnClick START ===")
-                local checked = checkbox:GetChecked()
-                print("Checkbox clicked for:", currentPath, "checked:", checked)
-                
-                -- Update this group's state and all its children
-                UpdateChildStates(currentPath, checked)
-                UpdateBackground()
-                
-                -- Refresh the tree view to update child checkboxes
-                container.RefreshTreeView()
-                
-                -- If checked, update the content panel
-                if checked then
-                    print("Checkbox is checked, getting items from:", currentPath)
-                    -- Get the root group name from the path
-                    local rootGroupName = strsplit("/", currentPath)
-                    print("Root group name:", rootGroupName)
-                    -- Get the root group data
-                    local rootGroup = FliprDB.groups[rootGroupName]
-                    print("Root group data:", rootGroup)
-                    if rootGroup then
-                        print("Root group structure:")
-                        for k, v in pairs(rootGroup) do
-                            if type(v) == "table" then
-                                print("  ", k, ":", "table with", CountTable(v), "entries")
-                            else
-                                print("  ", k, ":", v)
-                            end
-                        end
-                    end
-                    
-                    if not rootGroup then
-                        print("No root group found for:", rootGroupName)
-                        return
-                    end
-                    
-                    -- Get items from the group using the path
-                    print("Getting items from group with path:", currentPath)
-                    local items = {}
-                    local currentNode = rootGroup
-                    local pathParts = {strsplit("/", currentPath)}
-                    
-                    -- Navigate to the correct node
-                    for i, part in ipairs(pathParts) do
-                        print("Looking for part:", part)
-                        if i == 1 then
-                            -- We're already at the root node
-                            if currentNode.name ~= part then
-                                print("Root group name mismatch:", currentNode.name, "vs", part)
-                                return
-                            end
-                        else
-                            -- For subgroups, look in the children table
-                            if currentNode.children and currentNode.children[part] then
-                                currentNode = currentNode.children[part]
-                                print("Found child group:", part)
-                            else
-                                print("Could not find child group:", part)
-                                return
-                            end
-                        end
-                    end
-                    
-                    -- Collect items from the current node and its children
-                    local function collectItems(node)
-                        if node.items then
-                            for itemId, itemData in pairs(node.items) do
-                                items[itemId] = itemData
-                                print("Found item:", itemId)
-                            end
-                        end
-                        
-                        if node.children then
-                            for _, childNode in pairs(node.children) do
-                                collectItems(childNode)
-                            end
-                        end
-                    end
-                    
-                    collectItems(currentNode)
-                    print("Found items table:", items)
-                    if items then
-                        print("Items table structure:")
-                        for k, v in pairs(items) do
-                            print("  ", k, ":", type(v) == "table" and "table" or v)
-                        end
-                    end
-                    
-                    if items and next(items) then
-                        print("Number of items:", CountTable(items))
-                        container.UpdateContentPanel(currentPath)
-                    else
-                        print("No items found in group")
-                        print("Debug: currentPath parts:")
-                        for part in string.gmatch(currentPath, "[^/]+") do
-                            print("  Path part:", part)
-                        end
-                    end
-                else
-                    print("Checkbox unchecked, clearing content panel")
-                    -- Clear the content panel when unchecked
-                    for _, child in pairs({container.itemContent:GetChildren()}) do
-                        child:Hide()
-                        child:SetParent(nil)
-                    end
-                end
-                print("=== Checkbox OnClick END ===")
-            end)
-            
-            -- Add click handler to the BACKGROUND frame
-            bgFrame:EnableMouse(true)
-            bgFrame:SetScript("OnMouseDown", function(self, button)
-                print("=== Background OnMouseDown START ===")
-                print("Button clicked:", button)
-                if button == "LeftButton" then
-                    -- Don't handle clicks on the checkbox or expand button
-                    local x, y = GetCursorPosition()
-                    local scale = self:GetEffectiveScale()
-                    local left = self:GetLeft() * scale
-                    local checkboxRight = (checkbox:GetRight() or 0) * scale
-                    
-                    print("Cursor position:", x, y)
-                    print("Scale:", scale)
-                    print("Left:", left)
-                    print("Checkbox right:", checkboxRight)
-                    
-                    -- Only process click if it's to the right of the checkbox
-                    if x > checkboxRight then
-                        print("=== Click is to the right of checkbox ===")
-                        print("Looking up group:", currentPath)
-                        
-                        -- Get the root group name from the path
-                        local rootGroupName = strsplit("/", currentPath)
-                        print("Root group name:", rootGroupName)
-                        -- Get the root group data
-                        local rootGroup = FliprDB.groups[rootGroupName]
-                        print("Root group data:", rootGroup)
-                        if rootGroup then
-                            print("Root group structure:")
-                            for k, v in pairs(rootGroup) do
-                                if type(v) == "table" then
-                                    print("  ", k, ":", "table with", CountTable(v), "entries")
-                                else
-                                    print("  ", k, ":", v)
-                                end
-                            end
-                        end
-                        
-                        if not rootGroup then
-                            print("No root group found for:", rootGroupName)
-                            return
-                        end
-                        
-                        -- Get items from the group using the path
-                        print("Getting items from group with path:", currentPath)
-                        local items = {}
-                        local currentNode = rootGroup
-                        local pathParts = {strsplit("/", currentPath)}
-                        
-                        -- Navigate to the correct node
-                        for i, part in ipairs(pathParts) do
-                            print("Looking for part:", part)
-                            if i == 1 then
-                                -- We're already at the root node
-                                if currentNode.name ~= part then
-                                    print("Root group name mismatch:", currentNode.name, "vs", part)
-                                    return
-                                end
-                            else
-                                -- For subgroups, look in the children table
-                                if currentNode.children and currentNode.children[part] then
-                                    currentNode = currentNode.children[part]
-                                    print("Found child group:", part)
-                                else
-                                    print("Could not find child group:", part)
-                                    return
-                                end
-                            end
-                        end
-                        
-                        -- Collect items from the current node and its children
-                        local function collectItems(node)
-                            if node.items then
-                                for itemId, itemData in pairs(node.items) do
-                                    items[itemId] = itemData
-                                    print("Found item:", itemId)
-                                end
-                            end
-                            
-                            if node.children then
-                                for _, childNode in pairs(node.children) do
-                                    collectItems(childNode)
-                                end
-                            end
-                        end
-                        
-                        collectItems(currentNode)
-                        print("Found items table:", items)
-                        if items then
-                            print("Items table structure:")
-                            for k, v in pairs(items) do
-                                print("  ", k, ":", type(v) == "table" and "table" or v)
-                            end
-                        end
-                        
-                        if items and next(items) then
-                            print("Number of items:", CountTable(items))
-                            for itemID, itemData in pairs(items) do
-                                -- Make sure itemID is a number
-                                itemID = tonumber(itemID)
-                                if itemID then
-                                    print(string.format("Processing item: %d", itemID))
-                                    local name = GetItemInfo(itemID)
-                                    print(string.format("Item %d: %s", itemID, name or "loading..."))
-                                    
-                                    -- Also check itemDB
-                                    if FLIPR.itemDB and FLIPR.itemDB[itemID] then
-                                        print(string.format("  Found in itemDB: %s", FLIPR.itemDB[itemID].name))
-                                    else
-                                        print("  Not found in itemDB")
-                                    end
-                                else
-                                    print("Invalid itemID:", itemID)
-                                end
-                            end
-                            -- Pass the group path to UpdateContentPanel
-                            print("Updating content panel with group:", currentPath)
-                            container.UpdateContentPanel(currentPath)
-                        else
-                            print("No items found in group:", currentPath)
-                            print("Debug: currentPath parts:")
-                            for part in string.gmatch(currentPath, "[^/]+") do
-                                print("  Path part:", part)
-                            end
-                        end
-                    else
-                        print("Click was on or to the left of checkbox")
-                    end
-                end
-                print("=== Background OnMouseDown END ===")
-            end)
-            
-            -- Add hover effect to background
-            bgFrame:SetScript("OnEnter", function()
-                if not checkbox:GetChecked() then
-                    containerBg:SetColorTexture(0.3, 0.3, 0.3, 0.3)  -- Hover color
-                end
-            end)
-            
-            bgFrame:SetScript("OnLeave", function()
-                UpdateBackground()
-            end)
-            
-            print(string.format("Created item: %s at yOffset: %d", groupData.name, yOffset))
-            
-            yOffset = yOffset - 20
-            
-            -- Show children if expanded
-            if FLIPR.db.expandedGroups[currentPath] and groupData.children then
-                for childName, childData in pairs(groupData.children) do
-                    yOffset = CreateGroupTreeItem(childData, currentPath, yOffset, level + 1)
-                end
-            end
-            
-            return yOffset
-        end
-        
-        -- THEN define RefreshTreeView function that uses CreateGroupTreeItem
-        local function RefreshTreeView()
-            print("=== RefreshTreeView START ===")
-            if not treeContent then
-                print("ERROR: treeContent is nil in RefreshTreeView!")
-                return
-            end
-            
-            -- Clear existing content
-            for _, child in pairs({treeContent:GetChildren()}) do
-                child:Hide()
-                child:SetParent(nil)
-            end
-            
-            if not FLIPR.availableGroups then
-                print("ERROR: No available groups!")
-                return
-            end
-            
-            local yOffset = -10
-            for groupName, groupData in pairs(FLIPR.availableGroups) do
-                print(string.format("Processing root group: %s", groupName))
-                yOffset = CreateGroupTreeItem(groupData, nil, yOffset, 0)
-            end
-            
-            local finalHeight = math.abs(yOffset) + 20
-            print(string.format("Setting tree content height to: %d", finalHeight))
-            treeContent:SetHeight(math.max(finalHeight, 400))
-        end
-        
-        -- Store functions directly on the container
-        container.CreateGroupTreeItem = CreateGroupTreeItem
-        container.RefreshTreeView = RefreshTreeView
-        
-        -- Print debug info before refresh
-        print("Available groups before refresh:")
-        if FLIPR.availableGroups then
-            for groupName, _ in pairs(FLIPR.availableGroups) do
-                print("  -", groupName)
-            end
-        else
-            print("No available groups!")
-        end
-        
-        -- Call initial refresh
-        RefreshTreeView()
-        
-        -- Add right panel content display
-        local contentPanel = CreateFrame("Frame", "FliprContentPanel", container, BackdropTemplateMixin and "BackdropTemplate")
-        contentPanel:SetPoint("TOPLEFT", treePanel, "TOPRIGHT", 16, 0)
-        contentPanel:SetPoint("BOTTOMRIGHT", container, "BOTTOMRIGHT", -16, 16)
-        
-        -- Set up content panel backdrop (same style as tree panel)
-        contentPanel:SetBackdrop({
-            bgFile = "Interface/Tooltips/UI-Tooltip-Background",
-            edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
-            tile = true, tileSize = 16, edgeSize = 16,
-            insets = { left = 4, right = 4, top = 4, bottom = 4 }
-        })
-        contentPanel:SetBackdropColor(0.1, 0.1, 0.1, 0.8)
-        contentPanel:SetBackdropBorderColor(0.6, 0.6, 0.6)
-        
-        -- Add ITEMS label (same style as GROUPS)
-        local itemsLabel = contentPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-        itemsLabel:SetPoint("TOP", contentPanel, "TOP", 0, -8)
-        itemsLabel:SetText("ITEMS")
-        itemsLabel:SetTextColor(1, 0.82, 0, 1)  -- Gold color
-        
-        -- Create scroll frame for items
-        local itemScroll = CreateFrame("ScrollFrame", nil, contentPanel, "UIPanelScrollFrameTemplate")
-        itemScroll:SetPoint("TOPLEFT", contentPanel, "TOPLEFT", 8, -30)  -- Same offset as tree panel
-        itemScroll:SetPoint("BOTTOMRIGHT", contentPanel, "BOTTOMRIGHT", -28, 8)
-        
-        local itemContent = CreateFrame("Frame", nil, itemScroll)
-        itemContent:SetWidth(itemScroll:GetWidth())
-        itemContent:SetHeight(400)  -- Initial height
-        
-        -- Add debug background to item content
-        local itemBg = itemContent:CreateTexture(nil, "BACKGROUND")
-        itemBg:SetAllPoints()
-        itemBg:SetColorTexture(0, 0.2, 0, 0.3)  -- Slight green tint
-        
-        itemScroll:SetScrollChild(itemContent)
-        
-        -- Store references
-        container.contentPanel = contentPanel
-        container.itemContent = itemContent
-        
-        -- Function to update content panel with selected group's items
-        local function UpdateContentPanel(groupPath)
-            print("=== UpdateContentPanel START ===")
-            print("Updating content panel for group:", groupPath)
-            
-            -- Clear existing content
-            for _, child in pairs({itemContent:GetChildren()}) do
-                child:Hide()
-                child:SetParent(nil)
-            end
-            
-            -- Get the root group name from the path
-            local rootGroupName = strsplit("/", groupPath)
-            print("Root group name:", rootGroupName)
-            -- Get the root group data
-            local rootGroup = FliprDB.groups[rootGroupName]
-            if not rootGroup then
-                print("No root group found for:", rootGroupName)
-                return
-            end
-            
-            -- Get items from the group using the path
-            print("Getting items from group with path:", groupPath)
-            local items = {}
-            local currentNode = rootGroup
-            local pathParts = {strsplit("/", groupPath)}
-            
-            -- Navigate to the correct node
-            for i, part in ipairs(pathParts) do
-                print("Looking for part:", part)
-                if i == 1 then
-                    -- We're already at the root node
-                    if currentNode.name ~= part then
-                        print("Root group name mismatch:", currentNode.name, "vs", part)
-                        return
-                    end
-                else
-                    -- For subgroups, look in the children table
-                    if currentNode.children and currentNode.children[part] then
-                        currentNode = currentNode.children[part]
-                        print("Found child group:", part)
-                    else
-                        print("Could not find child group:", part)
-                        return
-                    end
-                end
-            end
-            
-            -- Collect items from the current node and its children
-            local function collectItems(node)
-                if node.items then
-                    for itemId, itemData in pairs(node.items) do
-                        items[itemId] = itemData
-                        print("Found item:", itemId)
-                    end
-                end
-                
-                if node.children then
-                    for _, childNode in pairs(node.children) do
-                        collectItems(childNode)
-                    end
-                end
-            end
-            
-            collectItems(currentNode)
-            print("Found items table:", items)
-            if items then
-                print("Items table structure:")
-                for k, v in pairs(items) do
-                    print("  ", k, ":", type(v) == "table" and "table" or v)
-                end
-            end
-            
-            if not items or not next(items) then 
-                print("No items found in group:", groupPath)
-                return 
-            end
-            
-            print("Found items in group:", groupPath)
-            print("Number of items:", CountTable(items))
-            
-            -- Display items
-            local yOffset = -10
-            for itemID, itemData in pairs(items) do
-                itemID = tonumber(itemID)
-                if itemID then
-                    print("Creating row for item:", itemID)
-                    
-                    -- Create item row
-                    local itemRow = CreateFrame("Frame", nil, itemContent)
-                    itemRow:SetHeight(24)
-                    itemRow:SetPoint("TOPLEFT", itemContent, "TOPLEFT", 0, yOffset)
-                    itemRow:SetPoint("RIGHT", itemContent, "RIGHT")
-                    
-                    -- Add row background
-                    local rowBg = itemRow:CreateTexture(nil, "BACKGROUND")
-                    rowBg:SetAllPoints()
-                    rowBg:SetColorTexture(0.1, 0.1, 0.1, 0.3)
-                    
-                    -- Add item icon and text
-                    local itemIcon = itemRow:CreateTexture(nil, "ARTWORK")
-                    itemIcon:SetSize(20, 20)
-                    itemIcon:SetPoint("LEFT", itemRow, "LEFT", 8, 0)
-                    
-                    -- Make row interactive
-                    itemRow:EnableMouse(true)
-                    itemRow:SetScript("OnEnter", function()
-                        rowBg:SetColorTexture(0.2, 0.2, 0.2, 0.8)
-                    end)
-                    itemRow:SetScript("OnLeave", function()
-                        rowBg:SetColorTexture(0.1, 0.1, 0.1, 0.3)
-                    end)
-                    
-                    print("Loading item data for:", itemID)
-                    -- Load item data asynchronously
-                    local item = Item:CreateFromItemID(itemID)
-                    item:ContinueOnItemLoad(function()
-                        local itemLink = item:GetItemLink()
-                        local _, _, _, _, icon = GetItemInfoInstant(itemID)
-                        print("Item loaded:", itemID, itemLink)
-                        
-                        itemIcon:SetTexture(icon)
-                        
-                        local itemName = itemRow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-                        itemName:SetPoint("LEFT", itemIcon, "RIGHT", 8, 0)
-                        itemName:SetText(itemLink)
-                        
-                        local itemIDText = itemRow:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-                        itemIDText:SetPoint("LEFT", itemName, "RIGHT", 8, 0)
-                        itemIDText:SetText(string.format("(ID: %d)", itemID))
-                        itemIDText:SetTextColor(0.7, 0.7, 0.7)
-                    end)
-                    
-                    yOffset = yOffset - 24
-                end
-            end
-            
-            -- Update content height
-            local finalHeight = math.abs(yOffset) + 20
-            print("Setting content height to:", finalHeight)
-            itemContent:SetHeight(math.max(finalHeight, 400))
-            print("=== UpdateContentPanel END ===")
-        end
-        
-        -- Store the update function
-        container.UpdateContentPanel = UpdateContentPanel
-        
-        return container
-    end
-    
-    -- Create content for all tabs
-    CreateGeneralSettings(generalTab.content)
-    CreateOperationsContent(operationsTab.content)
-    groupsTab.content.CreateGroupsContent = CreateGroupsContent
-    
-    -- Set up initial tab state
-    PanelTemplates_SetTab(panel, 1)
-    generalTab.content:Show()
-    operationsTab.content:Hide()
-    groupsTab.content:Hide()
-    
-    -- Store reference and register with Settings API
-    FLIPR.optionsPanel = panel
-    local category = Settings.RegisterCanvasLayoutCategory(panel, "FLIPR")
-    category.ID = "FLIPR"
-    Settings.RegisterAddOnCategory(category)
-    
-    -- Set up tab switching
-    panel.OnTabClick = function(tab)
-        print(string.format("=== Tab clicked: %d ===", tab:GetID()))
-        PanelTemplates_SetTab(panel, tab:GetID())
-        
-        -- Hide all tab contents
-        for _, t in ipairs(panel.tabs) do
-            if t.content then
-                print(string.format("Hiding content for tab: %d", t:GetID()))
-                t.content:Hide()
-            end
-        end
-        
-        -- Show selected tab content
-        if tab.content then
-            print(string.format("Showing content for tab: %d", tab:GetID()))
-            tab.content:Show()
-            
-            -- If this is the Groups tab, refresh the view
-            if tab:GetID() == 3 then
-                print("Groups tab selected, refreshing view...")
-                -- Force a refresh of the groups content
-                if not FLIPR.availableGroups then
-                    print("Initializing available groups...")
-                    FLIPR.availableGroups = FLIPR:GetAvailableGroups()
-                end
-                
-                -- Create the groups container if it doesn't exist
-                if not tab.content.groupsContainer then
-                    print("Creating groups container...")
-                    tab.content.groupsContainer = CreateGroupsContent(tab.content)
-                end
-                
-                -- Refresh the tree view if it exists
-                if tab.content.groupsContainer and tab.content.groupsContainer.RefreshTreeView then
-                    print("Refreshing tree view...")
-                    tab.content.groupsContainer.RefreshTreeView()
-                else
-                    print("ERROR: Groups container or RefreshTreeView not found!")
-                    print("groupsContainer:", tab.content.groupsContainer)
-                    if tab.content.groupsContainer then
-                        print("RefreshTreeView:", tab.content.groupsContainer.RefreshTreeView)
-                    end
-                end
-            end
-        end
-    end
-    
-    -- Set up panel refresh
-    panel.OnShow = function()
-        print("=== Panel OnShow START ===")
-        PanelTemplates_SetTab(panel, panel.selectedTab or 1)
-        for _, tab in ipairs(panel.tabs) do
-            if tab.content then
-                print(string.format("Hiding content for tab: %d", tab:GetID()))
-                tab.content:Hide()
-            end
-        end
-        
-        local selectedTab = panel.tabs[panel.selectedTab or 1]
-        if selectedTab and selectedTab.content then
-            print(string.format("Showing content for selected tab: %d", selectedTab:GetID()))
-            selectedTab.content:Show()
-            
-            -- If Groups tab is selected, ensure it's properly initialized
-            if selectedTab:GetID() == 3 then
-                print("Groups tab is selected, ensuring initialization...")
-                if not FLIPR.availableGroups then
-                    print("Initializing available groups...")
-                    FLIPR.availableGroups = FLIPR:GetAvailableGroups()
-                end
-                
-                -- Create the groups container if it doesn't exist
-                if not selectedTab.content.groupsContainer then
-                    print("Creating groups container...")
-                    selectedTab.content.groupsContainer = CreateGroupsContent(selectedTab.content)
-                end
-                
-                -- Refresh the tree view if it exists
-                if selectedTab.content.groupsContainer and selectedTab.content.groupsContainer.RefreshTreeView then
-                    print("Refreshing tree view...")
-                    selectedTab.content.groupsContainer.RefreshTreeView()
-                else
-                    print("ERROR: Groups container or RefreshTreeView not found!")
-                    print("groupsContainer:", selectedTab.content.groupsContainer)
-                    if selectedTab.content.groupsContainer then
-                        print("RefreshTreeView:", selectedTab.content.groupsContainer.RefreshTreeView)
-                    end
-                end
-            end
-        end
-        
-        print("=== Panel OnShow END ===")
-    end
-    
-    -- Set up tab click handlers
-    for _, tab in ipairs(panel.tabs) do
-        tab:SetScript("OnClick", function(self)
-            panel.OnTabClick(self)
-        end)
-    end
-    
-    panel:SetScript("OnShow", panel.OnShow)
-    
-    return panel
+    LibStub("AceConfig-3.0"):RegisterOptionsTable("FLIPR", options)
+    LibStub("AceConfigDialog-3.0"):AddToBlizOptions("FLIPR", "FLIPR")
 end 

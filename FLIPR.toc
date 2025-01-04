@@ -4,7 +4,7 @@
 ## Author: YourName
 ## Version: 0.069
 ## SavedVariables: FliprDB, FliprSettings
-## Dependencies: TradeSkillMaster_AppHelper
+## Dependencies: TradeSkillMaster, TradeSkillMaster_AppHelper
 
 # Libraries
 Libs\LibStub\LibStub.lua
@@ -17,15 +17,14 @@ Libs\LibSerialize\lib.xml
 Libs\Ace3\AceSerializer-3.0\AceSerializer-3.0.xml
 Libs\AceConsole-3.0\AceConsole-3.0.xml
 
-
-
 # Core files
-Parser.lua
 Core.lua
-Database.lua
+Parser.lua
 GroupTest.lua
 UI.lua
-Profitability.lua
+Profitability_Core.lua
+Profitability_TSM.lua
+Profitability_Classic.lua
 Scanner.lua
 Purchase.lua
 Options.lua
