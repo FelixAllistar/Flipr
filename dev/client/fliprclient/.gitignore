@@ -22,3 +22,20 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+# Tauri/Rust
+/target
+/dist
+*.pdb
+.DS_Store
+
+# Dependencies
+node_modules
+.env
+
+# Rust
+**/*.rs.bk
+Cargo.lock
+
+# Build artifacts
+*.log
+.cargo-ok
