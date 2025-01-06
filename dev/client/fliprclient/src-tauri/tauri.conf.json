@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "fliprserver",
+  "productName": "fliprclient",
   "version": "0.1.0",
   "identifier": "com.flipr.app",
   "build": {
@@ -13,7 +13,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "fliprserver",
+        "title": "fliprclient",
         "width": 800,
         "height": 600
       }
