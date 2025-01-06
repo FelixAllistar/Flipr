@@ -9,3 +9,22 @@ TradeSkillMaster/
 TradeSkillMaster_AppHelper/
 TradeSkillMaster_AppHelper/
 TradeSkillMaster/
+
+# Development environment
+dev/client/node_modules/
+dev/client/dist/
+dev/client/.env
+dev/client/.env.*
+
+# Python environment
+dev/server/__pycache__/
+dev/server/*.pyc
+dev/server/.env
+dev/server/.venv/
+dev/server/venv/
+
+# IDE and OS files
+.vscode/
+.idea/
+*.swp
+.DS_Store
