@@ -1,5 +1,5 @@
 Price Sources will return a numerical quantity in gold/silver/copper, and can be split between external and internal sources. External sources are provided by and/or calculated by TradeSkillMaster, such as DBMarket or DBRegionSaleAvg from AuctionDB, and internal sources are derived or calculated from other configurations and activity you have set or recorded in the addon, such as crafting or avgbuy.
- 
+ rwar
 
 TSM Accounting
 avgBuy (Avg Buy Price)
